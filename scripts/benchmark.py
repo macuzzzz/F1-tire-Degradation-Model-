@@ -64,7 +64,6 @@ from tyredeg.validation import candidate_models, cross_validate, leave_one_race_
 
 REPORTS = REPO_ROOT / "reports"
 FIGURES = REPORTS / "figures"
-SEED = 42  # rule 11
 
 # Wear ODE used for the solver benchmark (same as the Phase 3 study, D75).
 A_WEAR, B_WEAR, LAPS = 0.05, 0.03, 40.0
@@ -130,8 +129,9 @@ def bench_ode(perf):
 # ---------------------------------------------------------------------------
 # KNN: brute force vs kd-tree
 # ---------------------------------------------------------------------------
-def bench_knn(perf):
-    rng = np.random.default_rng(SEED)
+def bench_knn(perf, seed):
+    # Seed from config.yaml (random_seed, rule 11) so the synthetic data are reproducible.
+    rng = np.random.default_rng(seed)
     queries = rng.uniform(0, 60, size=perf.knn_queries)
     rows = []
     for n in perf.knn_train_sizes:
@@ -354,7 +354,7 @@ def main():
     if "ode" in sections:
         print("\nODE solvers:\n", bench_ode(perf).round(8).to_string(index=False))
     if "knn" in sections:
-        print("\nKNN:\n", bench_knn(perf).round(6).to_string(index=False))
+        print("\nKNN:\n", bench_knn(perf, config.random_seed).round(6).to_string(index=False))
     if "least_squares" in sections:
         print("\nLeast squares:\n", bench_least_squares(perf).to_string(index=False))
     if "strategy" in sections:

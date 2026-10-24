@@ -12,3 +12,6 @@ pytest-html==4.1.1
 pdoc==15.0.4
 PyYAML==6.0.3
 requests==2.34.2
+# Test coverage for the Phase 9 test report (decision D85).
+pytest-cov==6.2.1
+coverage==7.10.6

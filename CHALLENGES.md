@@ -215,3 +215,61 @@ are recorded in DECISIONS.md and the phase summaries.
   3. Added `guard_cv_rerun`: the CV stage now REFUSES when test results exist, unless `--force` is given. Checked: the stage now stops with a FirewallError and leaves the files untouched.
 - Resolution: resolved; files restored, guard added, test `test_cv_rerun_refused_after_the_test_unless_forced`.
 - Impact on results / lesson learned: no results changed (restored from git). Firewalls must protect every artifact, not only the test step. And never "just re-run" a stage whose outputs are frozen evidence; check first whether it writes them.
+
+## C17: Local file paths (with my user name) leaked into committed profile reports
+- Phase / date: Phase 9 / 2026-10-24
+- What happened: `reports/phase8_profile_before.csv` and `phase8_profile_after.csv`, committed in Phase 8 (c01bd56), contained absolute paths such as `C:/Users/<me>/Documents/.../scripts/benchmark.py`, exposing the local user name and folder layout. The first `reports/pipeline.log` also contained them (FastF1 cache path).
+- How it was detected: an automated security review of the Phase 8 commit flagged `profile_function` in `performance.py`; a search of `reports/` then found the paths in both profile CSVs and in the new pipeline log.
+- Root cause: `profile_function` shortened paths only for installed libraries (`site-packages/`) and `src/`; files elsewhere (the benchmark script itself) kept their absolute path. The logger writes absolute cache paths, which is harmless on screen but not in a committed file.
+- What was tried / resolution:
+  1. Added `short_path`: paths relative to the repository root, relative to `site-packages`, or else the file name only (doctested).
+  2. Cleaned the `function` column of both existing CSVs in place, WITHOUT re-running the benchmark, so the timings cited in D80 stay valid.
+  3. Added `reports/pipeline.log` to `.gitignore` (run-specific).
+
+  Verified: no local paths remain in `reports/`.
+- Impact on results / lesson learned: no numerical results changed. **The old paths remain in the git history of commit c01bd56**; removing them would require rewriting history, which is destructive and is left to my decision (the repository has not been pushed anywhere). Check generated artefacts for machine-specific information before committing them.
+
+## C18: Pipeline output differed from the committed Phase 5 CSVs in the last digit
+- Phase / date: Phase 9 / 2026-10-24
+- What happened: the first end-to-end pipeline run rewrote `reports/phase5_cv_folds.csv` and `phase5_cv_summary.csv` with slightly different numbers than the committed (Phase 5) versions.
+- How it was detected: `git status` after the first pipeline run, then a numeric comparison: max |difference| 6.1e-16 (folds) and 2.2e-16 (summary). All acceptance, selection and text columns are identical.
+- Root cause: the committed files were produced by the original stint-by-stint `predict_held_out_loop`; the pipeline uses the Phase 8 vectorised version, which sums the anchor laps with `numpy.bincount` in a different order. That changes the last binary digit of some means. It is the same effect D80 measured.
+- What was tried: (1) a second pipeline run: its own reproducibility check found **all 40 result files byte-identical** to the first run, so run-to-run reproducibility holds; (2) checked that the frozen `model_selection.json` was only VERIFIED, not rewritten (unchanged: 11:40:30 UTC, commit 7f7d6eb).
+- Resolution: the regenerated Phase 5 CSVs are committed in Phase 9, so the repository matches what the current code produces. The frozen selection and the test results are unchanged.
+- Impact on results / lesson learned: no conclusion changes (differences around 1e-16). Byte-identical reproducibility holds for the same code; a faster implementation can change round-off, so "the same results" must always come with a tolerance.
+
+## C19: The generated documentation published my local path too
+- Phase / date: Phase 9 / 2026-10-24
+- What happened: right after fixing C17, the first pdoc build of the HTML docs contained my absolute path in `docs/tyredeg/performance.html` and `docs/search.js`.
+- How it was detected: searching the generated `docs/` folder for the user name after the build (a check added because of C17).
+- Root cause: my C17 fix itself. It introduced a public module constant `REPO_ROOT = Path(__file__).resolve().parents[2]`, and pdoc documents the VALUE of public module variables, which here is an absolute local path.
+- What was tried: renamed it `_REPO_ROOT` (pdoc does not document private names); rebuilt the docs; re-ran the doctests.
+- Resolution: resolved; no local paths in `docs/` or `reports/`.
+- Impact on results / lesson learned: none on results. A fix can create the same leak elsewhere: re-check every generated artefact (reports AND docs) after the change.
+
+## C20: The HTML test report contained my local path in every skipped doctest
+- Phase / date: Phase 9 / 2026-10-25
+- What happened: the first `reports/test_report.html` (807 passed, 42 skipped) contained my absolute path 42 times.
+- How it was detected: searching the generated report and the coverage HTML for the user name (the check introduced after C17/C19).
+- Root cause: the 42 skips are doctest examples marked `+SKIP` (they need downloaded race data). pytest stores the location of each skip as an absolute path, here to `_pytest/doctest.py` inside `.venv`, and pytest-html writes it into the log of each skipped row. The coverage HTML was clean (it uses paths relative to the repository).
+- What was tried: a root `conftest.py` with a `pytest_runtest_makereport` hook that shortens the skip location to the part after `site-packages/` before the report is written.
+- Resolution: resolved; 0 occurrences in `reports/test_report.html` and `reports/coverage/` after the re-run. The coverage HTML (3 MB, regenerable) and the `.coverage` data file are gitignored; the test report is committed.
+- Impact on results / lesson learned: none on results (test outcomes unchanged). Third leak of the same kind (C17, C19, C20): every tool that writes a file (profiler, pdoc, pytest-html) can embed absolute paths, so the search for the user name must be run on every new generated artefact before committing.
+
+## C21: The first pipeline cleaning report showed 0 laps in its "input" row
+- Phase / date: Phase 9 / 2026-10-25
+- What happened: `reports/pipeline_cleaning_report.csv` from my first `run_pipeline.py` listed `input, 0, 0, 0, 0`, so the table did not show how many laps each race started with. The function also prepared every race twice.
+- How it was detected: reading the CSV while writing the D82 entry.
+- Root cause: my code took the `removed` column of the cleaning report for every row, and the `input` row has `removed = 0` by definition (its `remaining` column holds the lap count).
+- What was tried: `stage_data` now builds each race's column as laps loaded (`remaining` of the `input` row), then laps removed per rule, then clean laps kept. Each race is prepared once.
+- Resolution: resolved. The rows now balance, e.g. 2022: 1383 loaded − 371 removed = 1012 kept. The pipeline's hash check flagged the changed file as designed (D83).
+- Impact on results / lesson learned: none on the model results; only the report format changed. Check that a summary table adds up before writing about it.
+
+## C22: Hard rule 5 (complete NumPy docstrings) is not met for 126 public objects
+- Phase / date: Phase 9 / 2026-10-25
+- What happened: the review pass (D86) found that 126 of 214 public functions, methods and classes lack at least one required section (Raises 65, Example 63, Parameters 53, Returns 48, one with no docstring). 30 functions contain no input check; 18 of them (12 functions plus the six cleaning masks) are real gaps, where bad input gives an obscure error or a silently wrong result.
+- How it was detected: `scripts/review_api.py`, written for the Phase 9 review.
+- Root cause: from Phase 3 onward, short wrapper functions and small helpers (e.g. `heun`, `rk4`, the metric functions, the FLOP counters) were documented with a one-line summary pointing to the main function, and result classes got no Example. No automatic check enforced rule 5 while the code was being written.
+- What was tried: the gaps are listed in `reports/phase9_api_review.csv` and classified in D86. They were not fixed in Phase 9, because the brief asked for a list. Filling about 230 missing sections, each Example with verified output, is a separate change that should be reviewed on its own.
+- Resolution: open. To fix: complete the docstrings and add the 18 missing checks with tests, then re-run `review_api.py` until it reports 0.
+- Impact on results / lesson learned: none on results, since the functions are tested. A project rule that is not checked automatically drifts; the review script should have existed from Phase 1.

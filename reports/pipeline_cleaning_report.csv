@@ -1,0 +1,11 @@
+rule,2022 (train),2023 (train),2024 (train),2025 (test)
+laps loaded,1383,1255,1356,1369
+missing_lap_time,1,3,2,1
+first_lap,20,20,19,20
+pit_laps,84,72,80,58
+not_green,144,19,21,0
+inaccurate,0,0,0,0
+missing_stint_info,0,0,0,0
+outliers,94,86,75,58
+short_stints,28,42,41,3
+clean laps kept,1012,1013,1118,1229

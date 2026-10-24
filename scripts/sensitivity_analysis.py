@@ -145,9 +145,11 @@ def per_year_rates(clean, compounds):
     return rates
 
 
-def main():
+def main(config=None):
+    """Run this stage; ``config`` defaults to the repository's config.yaml (used by run_pipeline.py)."""
     logging.getLogger("fastf1").setLevel(logging.ERROR)
-    config = load_config(REPO_ROOT / "config.yaml")
+    if config is None:
+        config = load_config(REPO_ROOT / "config.yaml")
     races = [race for race in config.races if race.year in config.strategy.data_years]
     prepared = prepare_laps(config, races)
     selection = load_selection(REPO_ROOT / config.validation.selection_file)["selection"]

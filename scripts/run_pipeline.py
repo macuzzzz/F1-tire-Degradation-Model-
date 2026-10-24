@@ -1,4 +1,235 @@
-"""End-to-end pipeline: load, clean, fuel-correct, fit, validate, optimise.
+"""Run the whole workflow end to end from config.yaml (DECISIONS.md D82).
 
-This module is a placeholder created in Phase 1; it is implemented in Phase 9.
+    load -> clean -> fuel-correct -> fit -> validate -> (test) -> optimise -> sensitivity
+
+Usage (from the repository root):
+
+    .venv\\Scripts\\python scripts/run_pipeline.py                       # every stage
+    .venv\\Scripts\\python scripts/run_pipeline.py --stages strategy sensitivity
+    .venv\\Scripts\\python scripts/run_pipeline.py --config my_config.yaml --log-level DEBUG
+
+Stages (in this order; --stages runs a subset, still in this order):
+
+  data         load every race (cached; downloads only if missing), add Pirelli
+               compounds, fuel-correct, clean; writes the cleaning report per race.
+  validate     Phase 5 leave-one-race-out cross-validation on the TRAINING races.
+               Before the test has run it writes reports/model_selection.json;
+               afterwards it only VERIFIES that the recomputed selection equals the
+               frozen one (the frozen file is never overwritten, D55/C16).
+  test         the single evaluation on the test race. Skipped (with a log message)
+               if it has already been run, unless --force-test is given (logged).
+  strategy     Phase 6 race-time model and pit-stop optimisation.
+  sensitivity  Phase 7 one-at-a-time sensitivity and coefficients.
+
+Every run writes reports/pipeline_manifest.json with the SHA-256 hash of each
+result file. If a previous manifest exists, the run reports which result files
+changed: with the same config and code, none should (reproducibility check).
+The performance benchmarks (scripts/benchmark.py) are not part of the pipeline,
+because timings are machine-dependent by nature.
 """
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import hashlib
+import json
+import logging
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+import pandas as pd  # noqa: E402
+
+from tyredeg.config import load_config  # noqa: E402
+from tyredeg.preparation import prepare_laps  # noqa: E402
+
+STAGES = ("data", "validate", "test", "strategy", "sensitivity")
+REPORTS = REPO_ROOT / "reports"
+MANIFEST = REPORTS / "pipeline_manifest.json"
+# Files that legitimately change between runs (logs, the manifest itself) or
+# belong to the machine-dependent benchmarks are left out of the hash check.
+NOT_HASHED_PREFIXES = ("pipeline_manifest", "pipeline.log", "test_runs.log", "phase8_", "test_report",
+                       "coverage")
+
+logger = logging.getLogger("pipeline")
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as file:
+        for block in iter(lambda: file.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def result_hashes():
+    """SHA-256 of every result file in reports/ (recursively), except NOT_HASHED_PREFIXES."""
+    hashes = {}
+    for path in sorted(REPORTS.rglob("*")):
+        if path.is_file() and not path.name.startswith(NOT_HASHED_PREFIXES) \
+                and not any(part.startswith(NOT_HASHED_PREFIXES) for part in path.relative_to(REPORTS).parts):
+            hashes[path.relative_to(REPORTS).as_posix()] = sha256(path)
+    return hashes
+
+
+def ordered_stages(requested):
+    """The requested stages in pipeline order (a stage needs the ones before it)."""
+    return [stage for stage in STAGES if stage in requested]
+
+
+def changed_results(previous_hashes, hashes):
+    """Result files present in both runs whose SHA-256 differs (sorted names)."""
+    return sorted(name for name, digest in hashes.items()
+                  if name in previous_hashes and previous_hashes[name] != digest)
+
+
+def git_commit():
+    try:
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True,
+                              text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Stages
+# ---------------------------------------------------------------------------
+def stage_data(config):
+    """Load and clean every race; write the cleaning report per race.
+
+    One column per race: the number of laps loaded, the laps removed by each
+    cleaning rule (in the order they are applied, D17) and the clean laps kept.
+    """
+    columns = {}
+    for race in config.races:
+        prepared = prepare_laps(config, [race])
+        report = prepared.cleaning_report.set_index("rule")
+        loaded = int(report.loc["input", "remaining"])
+        removed = report["removed"].drop("input").astype(int)
+        column = pd.concat([pd.Series({"laps loaded": loaded}), removed,
+                            pd.Series({"clean laps kept": len(prepared.clean)})])
+        columns[f"{race.year} ({race.role})"] = column
+        logger.info("%d %s: %d laps loaded -> %d clean laps", race.year, race.event, loaded,
+                    len(prepared.clean))
+    table = pd.DataFrame(columns)
+    table.index.name = "rule"
+    table.to_csv(REPORTS / "pipeline_cleaning_report.csv")
+
+
+def stage_validate(config):
+    import compare_models
+
+    selection = REPO_ROOT / config.validation.selection_file
+    tested = (REPO_ROOT / config.validation.test_results_file).exists()
+    if selection.exists() and tested:
+        logger.info("Test already evaluated: recomputing the CV and VERIFYING the frozen selection.")
+        compare_models.run_cv(config, verify_only=True)
+    else:
+        logger.info("No test evaluation yet: running the CV and writing the model selection.")
+        compare_models.run_cv(config)
+
+
+def stage_test(config, force):
+    import compare_models
+
+    if (REPO_ROOT / config.validation.test_results_file).exists() and not force:
+        logger.info("The test race has already been evaluated once; reusing %s (use --force-test "
+                    "to re-run; every run is logged).", config.validation.test_results_file)
+        return
+    compare_models.run_test(config, force)
+
+
+def stage_strategy(config):
+    import optimise_strategy
+
+    optimise_strategy.main(config)
+
+
+def stage_sensitivity(config):
+    import sensitivity_analysis
+
+    sensitivity_analysis.main(config)
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def parse_arguments(argv):
+    parser = argparse.ArgumentParser(
+        description="Run the F1 tyre-degradation workflow end to end (load -> clean -> fuel-correct "
+                    "-> fit -> validate -> test -> optimise -> sensitivity).")
+    parser.add_argument("--config", default=str(REPO_ROOT / "config.yaml"),
+                        help="path to the YAML configuration (default: config.yaml)")
+    parser.add_argument("--stages", nargs="+", choices=STAGES, default=list(STAGES),
+                        help="stages to run, always executed in pipeline order (default: all)")
+    parser.add_argument("--force-test", action="store_true",
+                        help="re-run the single test evaluation (logged in reports/test_runs.log)")
+    parser.add_argument("--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR"))
+    parser.add_argument("--log-file", default=str(REPORTS / "pipeline.log"),
+                        help="also write the log to this file (default: reports/pipeline.log)")
+    return parser.parse_args(argv)
+
+
+def configure_logging(level, log_file):
+    Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=getattr(logging, level),
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(log_file, mode="w", encoding="utf-8")],
+        force=True,
+    )
+    # FastF1 logs every cache access at INFO; keep only its warnings and errors.
+    logging.getLogger("fastf1").setLevel(logging.WARNING)
+
+
+def main(argv=None):
+    args = parse_arguments(argv)
+    configure_logging(args.log_level, args.log_file)
+    config_path = Path(args.config).resolve()
+    config = load_config(config_path)
+    stages = ordered_stages(args.stages)
+    logger.info("Config %s (sha256 %s...), stages: %s", config_path.name, sha256(config_path)[:12],
+                ", ".join(stages))
+    REPORTS.mkdir(exist_ok=True)
+    previous = json.loads(MANIFEST.read_text(encoding="utf-8")) if MANIFEST.exists() else None
+
+    runners = {"data": stage_data, "validate": stage_validate,
+               "test": lambda c: stage_test(c, args.force_test),
+               "strategy": stage_strategy, "sensitivity": stage_sensitivity}
+    durations = {}
+    for stage in stages:
+        logger.info("=== stage %s: start ===", stage)
+        start = time.perf_counter()
+        runners[stage](config)
+        durations[stage] = round(time.perf_counter() - start, 2)
+        logger.info("=== stage %s: done in %.1f s ===", stage, durations[stage])
+
+    hashes = result_hashes()
+    if previous is not None and previous.get("config_sha256") == sha256(config_path):
+        changed = changed_results(previous["results_sha256"], hashes)
+        if changed:
+            logger.warning("Same config, but %d result file(s) changed since the last run: %s",
+                           len(changed), ", ".join(changed))
+        else:
+            logger.info("Reproducibility check: all %d result files identical to the previous run.",
+                        sum(name in previous["results_sha256"] for name in hashes))
+    MANIFEST.write_text(json.dumps({
+        "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "git_commit": git_commit(),
+        "config": config_path.name,
+        "config_sha256": sha256(config_path),
+        "stages": stages,
+        "stage_durations_s": durations,
+        "results_sha256": hashes,
+    }, indent=2), encoding="utf-8")
+    logger.info("Manifest written to %s", MANIFEST.relative_to(REPO_ROOT))
+
+
+if __name__ == "__main__":
+    main()

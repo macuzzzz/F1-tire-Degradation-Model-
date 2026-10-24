@@ -116,6 +116,7 @@ problems found during implementation that still need a decision.
 - Source / evidence: `.gitignore` contains `cache/`.
 - How it is validated: `git status` after a real download shows no cache files (checked 2026-10-24).
 - Proposed by AI, approved by me.
+- **Note (Phase 9 consistency review, D87 M1):** the key is now `fastf1.cache_dir`; it moved out of `data:` when the `openf1:` section (with `openf1.cache_dir`) was added in D15. The location is unchanged.
 
 ## D10: Configuration format
 - Phase / date: Phase 1 / 2026-10-24
@@ -143,6 +144,7 @@ problems found during implementation that still need a decision.
 - Source / evidence: The 2018 lower limit comes from my understanding that FastF1 lap timing starts in 2018; **not yet verified** — check the FastF1 documentation ("data availability").
 - How it is validated: `tests/test_config.py`.
 - Proposed by AI, approved by me.
+- **Note (Phase 9 consistency review, D87 M2):** `outlier_k`, `min_stint_laps` and `k_fuel` were set in Phase 2 (D19, D20, D22); `pit_loss_override` and `total_laps_override` are still `null` by decision (D24, D23, D58). The 2018 lower year limit has still not been verified against the FastF1 documentation.
 
 ## D13: Output format of the loader
 - Phase / date: Phase 1 / 2026-10-24
@@ -1415,6 +1417,163 @@ restored from git), `compare_models.py --stage cv` refuses to run when the test
 results exist, unless `--force` is given (`guard_cv_rerun`, tested). The
 committed selection (11:40:30 UTC, commit 7f7d6eb) is unchanged.
 **Decided by AI without prior approval (Phase 8), to be reviewed by me.**
+
+---
+
+# Phase 9: pipeline, documentation and reproducibility
+
+**For Phase 9 only, the decision protocol was overridden:** every decision below was made by the AI and implemented straight away. **Each is to be reviewed by me.** Problems met are in `CHALLENGES.md` (C17–C22). Evidence: `reports/pipeline_manifest.json`, `reports/pipeline_cleaning_report.csv`, `reports/test_report.html`, `reports/phase9_api_review.csv`.
+
+## D82: End-to-end pipeline script
+- Phase / date: Phase 9 / 2026-10-25
+- Options considered: (a) one script that calls the existing phase scripts' functions in order; (b) a rewrite of all stages inside one script; (c) a Makefile or shell script that runs the phase scripts one after another.
+- Decision: **(a)** `scripts/run_pipeline.py`:
+  - Stages `data → validate → test → strategy → sensitivity`. `--stages` runs a subset, always in pipeline order.
+  - Other options: `--config`, `--force-test`, `--log-level`, `--log-file` (default `reports/pipeline.log`).
+  - Logging goes to the console and to the log file. FastF1's INFO messages are reduced to warnings.
+  - **Test firewall:**
+    - Once the test has been run, `validate` recomputes the CV and only **verifies** that the selection equals the frozen `model_selection.json`. It raises an error if they differ, and never writes the file (D55, C16).
+    - `test` is skipped unless `--force-test` is given; every forced run is logged.
+  - `data` writes `reports/pipeline_cleaning_report.csv`: laps loaded, laps removed per rule, clean laps kept, per race.
+  - The Phase 8 benchmarks are not a stage, because their timings depend on the machine.
+- Justification:
+  - (a) reuses the tested code, so the pipeline and the phase scripts cannot give different results.
+  - (c) would need Make, which is not installed on Windows by default.
+  - A verify-only CV makes the pipeline safe to re-run after the test.
+- Source / evidence:
+  - Full runs with cached data: 14.5 s, 23.5 s and 30.2 s (other programs were running; the sensitivity stage dominates).
+  - The selection check printed "Recomputed selection matches the frozen model_selection.json (not overwritten)".
+  - `git diff` shows `model_selection.json` and `phase5_test_results.csv` unchanged.
+- How it is validated: `tests/test_pipeline.py`, which covers stage order, rejection of an unknown stage, the hash exclusions, changed-file detection and `selections_agree`.
+- **Decided by AI without prior approval (Phase 9), to be reviewed by me.**
+
+## D83: Reproducibility manifest
+- Phase / date: Phase 9 / 2026-10-25
+- Options considered:
+  - (a) record the inputs only (config, git commit);
+  - (b) also the SHA-256 hash of every result file, compared with the previous run;
+  - (c) compare against stored reference values with a tolerance.
+- Decision: **(b)**.
+  - Contents of `reports/pipeline_manifest.json`:
+    - UTC time;
+    - git commit;
+    - SHA-256 of the config file;
+    - stages run and their durations;
+    - SHA-256 of every file in `reports/` and `reports/figures/`.
+  - Files left out of the hashes: the manifest itself, `pipeline.log`, `test_runs.log`, `phase8_*` (benchmarks), `test_report*` and `coverage/`.
+  - If the config hash equals the previous manifest's, the run logs which result files changed; with the same code, none should.
+- Justification:
+  - Byte-identical outputs are the strictest reproducibility test, and a hash needs no tolerance.
+  - Excluded files change on every run by nature: timestamps, timings, logs.
+  - (c) is already covered by the unit tests.
+- Source / evidence:
+  - Two consecutive full runs: "all 40 result files identical".
+  - After the Phase 9 edits: "all 41 result files identical" (the new file is `phase9_api_review.csv`).
+  - The one change seen during development was intended: the new cleaning-report format (D82). It was reported as a warning, as designed.
+- How it is validated: `test_result_hashes_skip_logs_manifest_and_benchmarks`, `test_changed_results_ignores_new_files_and_reports_changed_ones`.
+- Limitation: identical bytes are guaranteed only with the same library versions (`requirements-lock.txt`) and the same code. A different implementation can change round-off (C18).
+- **Decided by AI without prior approval (Phase 9), to be reviewed by me.**
+
+## D84: README and API documentation
+- Phase / date: Phase 9 / 2026-10-25
+- Options considered:
+  - pdoc docstring format: `--docformat numpy` vs the default (markdown);
+  - output: committed `docs/` vs generated on demand only.
+- Decision:
+  - **README.md** sections:
+    - purpose and engineering problem;
+    - inputs table (key, unit, the valid range enforced by `config.py`, value used);
+    - outputs table (unit, file);
+    - headline results copied from the result files;
+    - installation, running, tests, documentation;
+    - repository structure, data and licensing, limitations;
+    - links to DECISIONS, CHALLENGES and LESSONS_SUMMARY;
+    - an AI-use section with placeholders for me to complete.
+  - **API docs:** `.venv/Scripts/python -m pdoc src/tyredeg -o docs --docformat numpy`. The HTML in `docs/` is committed, so it can be read without installing anything.
+  - Module constants that hold machine-specific values are private (leading underscore), so pdoc does not publish them (C19).
+- Justification: `--docformat numpy` renders the Parameters/Returns/Raises sections as headed lists instead of plain text. 25 modules were built with no warnings.
+- Source / evidence: pdoc 15.0.4 `--help` lists `--docformat` with the choices markdown, google, numpy and restructuredtext.
+- How it is validated: search of `docs/` for local paths (0 found; C19), visual check of `docs/index.html`.
+- **Decided by AI without prior approval (Phase 9), to be reviewed by me.**
+
+## D85: Test report and coverage (new dependency: pytest-cov)
+- Phase / date: Phase 9 / 2026-10-25
+- Options considered: (a) pytest-html only; (b) pytest-html plus pytest-cov; (c) the `coverage` command-line tool run separately.
+- Decision: **(b)**. One command produces both reports:
+  ```
+  .venv/Scripts/python -m pytest tests src/tyredeg --doctest-modules --html=reports/test_report.html --self-contained-html --cov=tyredeg --cov-report=term --cov-report=html:reports/coverage
+  ```
+  - **New dependencies:** `pytest-cov==6.2.1` and its dependency `coverage==7.10.6`, pinned in `requirements.txt` (an amendment to D11). `requirements-lock.txt` was regenerated: only these 2 lines were added.
+  - Doctests are included (`--doctest-modules src/tyredeg`). Plain `pytest` still runs the unit tests only.
+  - `--self-contained-html` puts the CSS inside the file, so the report is one file. It is committed.
+  - The coverage HTML (3 MB, regenerated by the command) and `.coverage` are git-ignored.
+  - A root `conftest.py` shortens skip locations, so the report contains no local paths (C20).
+- Justification:
+  - The Phase 9 brief allows a new dependency for coverage if it is logged.
+  - (c) needs a second command and gives the same numbers.
+- Source / evidence:
+  - Final run: **813 passed, 42 skipped** (all 42 are doctest examples marked `+SKIP` because they need downloaded data). Total line coverage 94 % (3,068 statements, 170 missed).
+  - Lowest-covered modules: `preparation.py` 52 % (it loads real data, so only the pipeline exercises it), `sensitivity.py` 78 %, `strategy.py` 81 %.
+  - `pip check` reports no broken requirements.
+- How it is validated: the command above; a search of the report for the user name (0 found).
+- **Decided by AI without prior approval (Phase 9), to be reviewed by me.**
+
+## D86: Review pass of docstrings and input validation
+- Phase / date: Phase 9 / 2026-10-25
+- Options considered: (a) review by hand; (b) a script that parses the source code and lists the gaps, followed by a manual check of what it flags.
+- Decision: **(b)** `scripts/review_api.py`, which writes `reports/phase9_api_review.csv`.
+  - It checks every public function, method and class for the sections required by CLAUDE.md rule 5: Parameters (if the function takes arguments), Returns (if it returns a value), Raises and Example. Classes need an Example only.
+  - It also checks whether each function raises an error, directly or through package functions it calls. Calls are matched by name only, so this is a heuristic.
+  - **The gaps are listed, not fixed, in Phase 9** (the brief asks for a list). Fixing them is a separate, reviewable change.
+- Justification: 214 objects are too many to check reliably by hand, and the script can be re-run after the docstrings are fixed.
+- Source / evidence (`phase9_api_review.csv`):
+  - **126 of 214 objects lack at least one required section:** Raises 65, Example 63, Parameters 53, Returns 48, and 1 with no docstring at all (`LinearDegradation.degradation`). 66 of the 126 miss only Raises and/or Example.
+  - **30 functions take arguments but contain no check.** Checked by hand:
+    - *Real gaps (bad input gives an obscure error or a silently wrong result):*
+      - `strategy.fuel_effect_total`: negative laps are accepted silently.
+      - `strategy.feasible_pit_laps`: an unknown compound gives a `KeyError`.
+      - `validation.binned_residuals`: arrays of different lengths, or unsorted edges.
+      - `validation.summarize_folds`: no baseline rows.
+      - `validation.rank_compounds`: no `rate` column.
+      - `sensitivity.tornado_table`: no nominal row.
+      - `sensitivity.one_at_a_time`, `sensitivity.plot_tornado`, `validation.write_selection`.
+      - `models.common.check_non_negative`, `resample_stints`, `format_parameter_table`.
+      - The six `cleaning.*_mask` functions: a missing column gives a `KeyError`. They are normally called through `apply_cleaning`, which does validate.
+    - *Accept any input by design* (they return False or a fallback): `is_green_track_status`, `is_missing`, `is_green_lap`, `performance.short_path`.
+    - *Internal helpers that are public by name* and are only called with validated data: `StintData.demean`, `StintData.stint_means`, `differentiation.default_step`, `OpenF1Client.cache_path`, and the four `*_flops` counters.
+- How it is validated: re-run the script after the fixes. The target is 0 incomplete docstrings and no unexplained "validates = no".
+- **Decided by AI without prior approval (Phase 9), to be reviewed by me.**
+
+## D87: Consistency review (DECISIONS.md vs config.yaml vs code)
+- Phase / date: Phase 9 / 2026-10-25
+- Options considered: n/a (a review).
+- Decision: every numerical value in config.yaml was traced to its decision, and every module-level constant in the code to config.yaml. Mismatches found:
+
+  | # | Where | Mismatch | Action |
+  |---|---|---|---|
+  | M1 | D9 | names the key `data.cache_dir`; the code and config use `fastf1.cache_dir` (moved when the `openf1:` section was added, D15) | note added to D9 |
+  | M2 | D12 | says `k_fuel`, `outlier_k` and `min_stint_laps` are `null`; they were set by D19, D20 and D22 in Phase 2. The 2018 lower year limit is still unverified | note added to D12 |
+  | M3 | D3 | seasons 2022–2025, but the strategy uses 2023–2025 (D56) | none: D56 records it; the CV/test still use 2022–2025 |
+  | M4 | D4, D6 | the "Decision:" lines still say Bahrain/HARD and Red Bull only | none: the amendments below them (Hungary/C3, all teams) and D52 (C3 + C4) supersede them |
+  | M5 | D11 | the pin list leaves out `requests` (D15) and `pytest-cov`/`coverage` (D85) | covered by the D11 amendment and D85 |
+  | M6 | `scripts/benchmark.py` | `SEED = 42` hard-coded instead of `config.random_seed` | **fixed**: passed from the config. Same value, so the Phase 8 results stay valid; the benchmark was not re-run |
+  | M7 | README.md | Phase 1 placeholder | rewritten (D84) |
+  | M8 | `LICENSE` | copyright holder is the placeholder `[my name]` | left for me to fill in |
+
+  - No value mismatches: all numbers in config.yaml match the decision that set them. The code defaults that mirror config.yaml (ODE, root finding, differentiation, linear, model, sensitivity and performance defaults) are already tested for equality (`tests/test_numerics_defaults.py`, `tests/test_config.py`).
+  - Constants that are **not** in config.yaml, by design: the MAD-to-SD factor 1.4826 and the minimum of 3 laps for the outlier test (cleaning), the round-off factor 4 (D30 amendment), the RK45 error exponent −1/5, the uniform-spacing tolerance 1e-9, the HTTP timeout of 30 s, and the KNN query block of 512 (memory only, identical results). These are mathematical constants or implementation details, not modelling choices.
+- How it is validated: the review can be repeated with `grep` over `src/`, plus the defaults tests.
+- **Decided by AI without prior approval (Phase 9), to be reviewed by me.**
+
+## D88: Git workflow for submission
+- Phase / date: Phase 9 / 2026-10-25
+- Options considered: (a) one commit per phase on `main` (as in Phases 1–8); (b) a branch per phase, merged into `main`; (c) (a) plus an annotated tag on the submitted commit.
+- Decision: **(c)**. Phase 9 is committed on `main` like the earlier phases. The final submitted state gets an annotated tag (e.g. `v1.0-submission`), so the assessed version can be named exactly.
+  - Commit and tag only on my instruction.
+  - The local-path leak in the history of commit c01bd56 (C17) can only be removed by rewriting history. That is my decision; the repository has not been pushed.
+- Justification: one developer and a linear history, so branches add no safety. A tag names the assessed version without moving files.
+- How it is validated: `git status` is clean after the commit; `git ls-files` contains no `cache/` files.
+- **Decided by AI without prior approval (Phase 9), to be reviewed by me.**
 
 ---
 

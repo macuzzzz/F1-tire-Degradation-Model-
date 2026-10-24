@@ -43,6 +43,7 @@ import sys
 import time
 import tracemalloc
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -349,6 +350,37 @@ def solver_flops(method, n_steps, f_flops=WEAR_RHS_FLOPS, n_rejected=0):
 # ---------------------------------------------------------------------------
 # Profiling
 # ---------------------------------------------------------------------------
+# Private (leading underscore): pdoc would otherwise publish its absolute value (C19).
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def short_path(filename):
+    """A path that is safe to save in shared results: never an absolute local path.
+
+    Files inside the repository are given relative to its root (e.g.
+    ``scripts/benchmark.py``), installed libraries relative to
+    ``site-packages`` (e.g. ``pandas/core/frame.py``), and anything else by
+    its file name only. This keeps the user name and folder layout of the
+    machine out of committed reports (found by a security review, C17).
+
+    Example
+    -------
+    >>> short_path(str(_REPO_ROOT / "scripts" / "benchmark.py"))
+    'scripts/benchmark.py'
+    >>> short_path("C:/Users/someone/lib/site-packages/pandas/core/frame.py")
+    'pandas/core/frame.py'
+    >>> short_path("/home/someone/private/notes.py")
+    'notes.py'
+    """
+    text = str(filename).replace("\\", "/")
+    if "/site-packages/" in text:
+        return text.split("/site-packages/")[-1]
+    try:
+        return Path(filename).resolve().relative_to(_REPO_ROOT).as_posix()
+    except (ValueError, OSError):
+        return Path(text).name
+
+
 def profile_function(func, top=25):
     """Profile ``func()`` with cProfile; return (its result, table of top functions).
 
@@ -383,7 +415,7 @@ def profile_function(func, top=25):
     stats = pstats.Stats(profiler, stream=io.StringIO())
     rows = []
     for (filename, line, name), (_, ncalls, tottime, cumtime, _) in stats.stats.items():
-        short = filename.replace("\\", "/").split("/site-packages/")[-1].split("/src/")[-1]
+        short = short_path(filename)
         rows.append({"function": f"{short}:{line}({name})", "ncalls": ncalls, "tottime_s": tottime,
                      "cumtime_s": cumtime, "percall_cum_s": cumtime / ncalls if ncalls else 0.0})
     table = pd.DataFrame(rows).sort_values("cumtime_s", ascending=False).head(top)

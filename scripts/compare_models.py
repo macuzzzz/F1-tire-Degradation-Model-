@@ -94,10 +94,24 @@ def physical_checks(spec, laps, config):
             "drops_over_tolerance": mono.n_drops_over_tolerance, "monotonic_ok": mono.ok}, model
 
 
-def run_cv(config, force=False):
-    # After the test stage has run, the frozen selection must not be overwritten (C16).
-    guard_cv_rerun(REPO_ROOT / config.validation.selection_file,
-                   REPO_ROOT / config.validation.test_results_file, force)
+def selections_agree(frozen, recomputed):
+    """True if the recomputed selection picks the same models as the frozen one."""
+    for compound, choice in recomputed.items():
+        saved = frozen.get(compound)
+        if saved is None or saved["selected"] != choice["selected"] \
+                or saved["family_winners"] != choice["family_winners"]:
+            return False
+    return True
+
+
+def run_cv(config, force=False, verify_only=False):
+    """Cross-validation stage. ``verify_only`` recomputes everything but, instead of
+    writing model_selection.json, checks that the recomputed selection equals the
+    frozen one (used by run_pipeline.py after the test; D82)."""
+    if not verify_only:
+        # After the test stage has run, the frozen selection must not be overwritten (C16).
+        guard_cv_rerun(REPO_ROOT / config.validation.selection_file,
+                       REPO_ROOT / config.validation.test_results_file, force)
     races = config.train_races
     assert all(race.role == "train" for race in races)
     print(f"Cross-validation on TRAINING races only: {[r.year for r in races]} (test race not loaded)")
@@ -163,8 +177,16 @@ def run_cv(config, force=False):
     residuals = pd.concat(residual_rows)
     residuals.to_csv(REPORTS / "phase5_residual_bins.csv", index=False)
     pd.DataFrame([fuel.__dict__]).to_csv(REPORTS / "phase5_fuel_diagnostic.csv", index=False)
-    write_selection(config.validation.selection_file if config.validation.selection_file.is_absolute()
-                    else REPO_ROOT / config.validation.selection_file, selection, {
+    selection_path = (config.validation.selection_file if config.validation.selection_file.is_absolute()
+                      else REPO_ROOT / config.validation.selection_file)
+    if verify_only:
+        frozen = load_selection(selection_path)["selection"]
+        if not selections_agree(frozen, selection):
+            raise RuntimeError("The recomputed model selection differs from the frozen "
+                               f"{selection_path.name}: results are not reproducible.")
+        print(f"Recomputed selection matches the frozen {selection_path.name} (not overwritten).")
+    else:
+        write_selection(selection_path, selection, {
                         "training_races": [f"{r.year} {r.event}" for r in races],
                         "test_races_not_used": [f"{r.year} {r.event}" for r in config.test_races],
                         "compounds": list(config.pirelli_compounds),

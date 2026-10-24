@@ -1,0 +1,215 @@
+file,line,name,kind,missing_sections,validates_inputs
+src/tyredeg/cleaning.py,119,missing_lap_time_mask,function,Raises,no
+src/tyredeg/cleaning.py,140,first_lap_mask,function,Raises,no
+src/tyredeg/cleaning.py,163,pit_laps_mask,function,Raises,no
+src/tyredeg/cleaning.py,188,not_green_mask,function,Raises,no
+src/tyredeg/cleaning.py,213,inaccurate_mask,function,Raises,no
+src/tyredeg/cleaning.py,243,missing_stint_info_mask,function,Raises,no
+src/tyredeg/cleaning.py,271,theil_sen_line,function,,yes
+src/tyredeg/cleaning.py,332,robust_outlier_flags,function,,yes
+src/tyredeg/cleaning.py,388,outliers_mask,function,,yes
+src/tyredeg/cleaning.py,423,short_stints_mask,function,,yes
+src/tyredeg/cleaning.py,473,clean_laps,function,,yes
+src/tyredeg/config.py,143,RaceSpec,class,Example,n/a
+src/tyredeg/config.py,168,OdeSettings,class,Example,n/a
+src/tyredeg/config.py,181,RootFindingSettings,class,Example,n/a
+src/tyredeg/config.py,191,NumericsSettings,class,Example,n/a
+src/tyredeg/config.py,204,VerificationSettings,class,Example,n/a
+src/tyredeg/config.py,219,ModelSettings,class,Example,n/a
+src/tyredeg/config.py,242,ValidationSettings,class,Example,n/a
+src/tyredeg/config.py,254,StrategySettings,class,Example,n/a
+src/tyredeg/config.py,268,SensitivitySettings,class,Example,n/a
+src/tyredeg/config.py,280,PerformanceSettings,class,Example,n/a
+src/tyredeg/config.py,296,Config,class,Example,n/a
+src/tyredeg/config.py,702,config_from_dict,function,,yes
+src/tyredeg/config.py,827,load_config,function,,yes
+src/tyredeg/data_loading.py,89,enable_cache,function,,yes
+src/tyredeg/data_loading.py,134,timedelta_to_seconds,function,,yes
+src/tyredeg/data_loading.py,169,is_green_track_status,function,Raises,no
+src/tyredeg/data_loading.py,283,load_fastf1_laps,function,,yes
+src/tyredeg/data_loading.py,335,load_race_laps,function,,yes
+src/tyredeg/data_loading.py,392,load_many,function,,yes
+src/tyredeg/data_loading.py,451,select_laps,function,,yes
+src/tyredeg/fuel_correction.py,53,fill_total_laps,function,,yes
+src/tyredeg/fuel_correction.py,122,fuel_corrected_time,function,,yes
+src/tyredeg/fuel_correction.py,188,add_fuel_corrected_times,function,,yes
+src/tyredeg/fuel_correction.py,247,PitLossEstimate,class,Example,n/a
+src/tyredeg/fuel_correction.py,302,estimate_pit_loss,function,,yes
+src/tyredeg/loading_common.py,87,RaceNotFoundError,class,Example,n/a
+src/tyredeg/loading_common.py,94,RaceDataUnavailableError,class,Example,n/a
+src/tyredeg/loading_common.py,105,validate_year,function,"Parameters, Example",yes
+src/tyredeg/loading_common.py,125,validate_event,function,"Parameters, Raises, Example",yes
+src/tyredeg/loading_common.py,133,validate_session,function,"Parameters, Raises, Example",yes
+src/tyredeg/loading_common.py,139,check_event_name,function,,yes
+src/tyredeg/loading_common.py,181,make_race_id,function,,yes
+src/tyredeg/loading_common.py,218,finalise_laps,function,,yes
+src/tyredeg/loading_common.py,280,unknown_total_laps,function,"Returns, Raises, Example",n/a
+src/tyredeg/loading_common.py,290,is_missing,function,"Parameters, Returns, Raises, Example",no
+src/tyredeg/models/common.py,36,NotFittedError,class,Example,n/a
+src/tyredeg/models/common.py,41,StintData,class,Example,n/a
+src/tyredeg/models/common.py,69,StintData.demean,method,"Parameters, Returns, Raises, Example",no
+src/tyredeg/models/common.py,73,StintData.stint_means,method,"Parameters, Returns, Raises, Example",no
+src/tyredeg/models/common.py,80,check_compound,function,,yes
+src/tyredeg/models/common.py,113,check_tyre_age,function,"Parameters, Returns",yes
+src/tyredeg/models/common.py,138,prepare_stint_data,function,,yes
+src/tyredeg/models/common.py,186,check_degrees_of_freedom,function,"Parameters, Returns, Raises, Example",yes
+src/tyredeg/models/common.py,201,stint_labels_from_laps,function,,yes
+src/tyredeg/models/common.py,236,ConstraintCheck,class,Example,n/a
+src/tyredeg/models/common.py,256,check_non_negative,function,Raises,no
+src/tyredeg/models/common.py,297,BootstrapResult,class,Example,n/a
+src/tyredeg/models/common.py,323,resample_stints,function,"Parameters, Returns, Raises, Example",no
+src/tyredeg/models/common.py,339,stint_bootstrap,function,,yes
+src/tyredeg/models/common.py,397,format_parameter_table,function,"Parameters, Returns, Raises, Example",no
+src/tyredeg/models/knn.py,64,KNNRegressor,class,,n/a
+src/tyredeg/models/knn.py,95,KNNRegressor.fit,method,Example,yes
+src/tyredeg/models/knn.py,145,KNNRegressor.predict,method,Example,yes
+src/tyredeg/models/knn.py,178,KNNDegradationModel,class,,n/a
+src/tyredeg/models/knn.py,222,KNNDegradationModel.fit,method,Example,yes
+src/tyredeg/models/knn.py,261,KNNDegradationModel.degradation,method,Example,yes
+src/tyredeg/models/knn.py,280,KNNDegradationModel.predict,method,"Parameters, Returns, Example",yes
+src/tyredeg/models/knn.py,299,KNNDegradationModel.stint_offsets,method,,n/a
+src/tyredeg/models/knn.py,320,KNNDegradationModel.params,method,Example,n/a
+src/tyredeg/models/knn.py,349,KNNDegradationModel.summary,method,"Returns, Raises, Example",n/a
+src/tyredeg/models/polynomial.py,44,PolynomialDegradationModel,class,,n/a
+src/tyredeg/models/polynomial.py,102,PolynomialDegradationModel.fit,method,,yes
+src/tyredeg/models/polynomial.py,179,PolynomialDegradationModel.degradation,method,,yes
+src/tyredeg/models/polynomial.py,208,PolynomialDegradationModel.predict,method,,yes
+src/tyredeg/models/polynomial.py,245,PolynomialDegradationModel.stint_offsets,method,,n/a
+src/tyredeg/models/polynomial.py,269,PolynomialDegradationModel.parameter_names,method,"Returns, Raises, Example",n/a
+src/tyredeg/models/polynomial.py,276,PolynomialDegradationModel.bootstrap,method,,yes
+src/tyredeg/models/polynomial.py,311,PolynomialDegradationModel.params,method,,n/a
+src/tyredeg/models/polynomial.py,351,PolynomialDegradationModel.summary,method,"Returns, Raises",n/a
+src/tyredeg/models/wear_ode.py,75,exact_unit_response,function,,yes
+src/tyredeg/models/wear_ode.py,112,exact_degradation,function,,yes
+src/tyredeg/models/wear_ode.py,144,unit_response,function,,yes
+src/tyredeg/models/wear_ode.py,222,WearODEModel,class,,n/a
+src/tyredeg/models/wear_ode.py,348,WearODEModel.fit,method,,yes
+src/tyredeg/models/wear_ode.py,430,WearODEModel.degradation,method,,yes
+src/tyredeg/models/wear_ode.py,453,WearODEModel.predict,method,,yes
+src/tyredeg/models/wear_ode.py,487,WearODEModel.stint_offsets,method,,n/a
+src/tyredeg/models/wear_ode.py,513,WearODEModel.bootstrap,method,,yes
+src/tyredeg/models/wear_ode.py,550,WearODEModel.params,method,,n/a
+src/tyredeg/models/wear_ode.py,595,WearODEModel.summary,method,"Returns, Raises, Example",n/a
+src/tyredeg/numerics/differentiation.py,54,default_step,function,Raises,no
+src/tyredeg/numerics/differentiation.py,111,forward_difference,function,,yes
+src/tyredeg/numerics/differentiation.py,146,backward_difference,function,"Parameters, Returns, Raises",yes
+src/tyredeg/numerics/differentiation.py,162,central_difference,function,"Parameters, Returns, Raises",yes
+src/tyredeg/numerics/differentiation.py,182,central_second_difference,function,"Parameters, Returns, Raises",yes
+src/tyredeg/numerics/differentiation.py,223,forward_difference_samples,function,,yes
+src/tyredeg/numerics/differentiation.py,253,backward_difference_samples,function,"Parameters, Raises",yes
+src/tyredeg/numerics/differentiation.py,272,central_difference_samples,function,,yes
+src/tyredeg/numerics/differentiation.py,309,central_second_difference_samples,function,,yes
+src/tyredeg/numerics/least_squares.py,59,LeastSquaresResult,class,Example,n/a
+src/tyredeg/numerics/least_squares.py,111,fit_linear_least_squares,function,,yes
+src/tyredeg/numerics/least_squares.py,164,fit_linear_least_squares_qr,function,"Parameters, Returns, Raises",yes
+src/tyredeg/numerics/least_squares.py,207,PolynomialFit,class,Example,n/a
+src/tyredeg/numerics/least_squares.py,230,PolynomialFit.predict,method,"Parameters, Returns, Raises",yes
+src/tyredeg/numerics/least_squares.py,242,PolynomialFit.unscaled_coefficients,method,"Returns, Raises",n/a
+src/tyredeg/numerics/least_squares.py,257,unscaling_matrix,function,,yes
+src/tyredeg/numerics/least_squares.py,299,polynomial_design_matrix,function,,yes
+src/tyredeg/numerics/least_squares.py,340,fit_polynomial,function,,yes
+src/tyredeg/numerics/linear_solvers.py,42,SingularMatrixError,class,Example,n/a
+src/tyredeg/numerics/linear_solvers.py,46,NearSingularWarning,class,Example,n/a
+src/tyredeg/numerics/linear_solvers.py,51,LinearSolveResult,class,Example,n/a
+src/tyredeg/numerics/linear_solvers.py,90,forward_substitution,function,,yes
+src/tyredeg/numerics/linear_solvers.py,133,back_substitution,function,,yes
+src/tyredeg/numerics/linear_solvers.py,173,lu_factor,function,,yes
+src/tyredeg/numerics/linear_solvers.py,227,lu_solve,function,,yes
+src/tyredeg/numerics/linear_solvers.py,258,condition_number_1norm,function,,yes
+src/tyredeg/numerics/linear_solvers.py,296,gaussian_elimination,function,,yes
+src/tyredeg/numerics/ode_solvers.py,211,euler,function,,yes
+src/tyredeg/numerics/ode_solvers.py,253,heun,function,"Parameters, Returns, Raises",yes
+src/tyredeg/numerics/ode_solvers.py,268,rk4,function,"Parameters, Returns, Raises",yes
+src/tyredeg/numerics/ode_solvers.py,287,RK45Stats,class,Example,n/a
+src/tyredeg/numerics/ode_solvers.py,346,rk45,function,,yes
+src/tyredeg/numerics/root_finding.py,58,NoSignChangeError,class,Example,n/a
+src/tyredeg/numerics/root_finding.py,62,ZeroDerivativeError,class,Example,n/a
+src/tyredeg/numerics/root_finding.py,66,DivergenceError,class,Example,n/a
+src/tyredeg/numerics/root_finding.py,70,NotConvergedError,class,Example,n/a
+src/tyredeg/numerics/root_finding.py,75,RootResult,class,Example,n/a
+src/tyredeg/numerics/root_finding.py,139,bisection,function,,yes
+src/tyredeg/numerics/root_finding.py,210,secant,function,,yes
+src/tyredeg/numerics/root_finding.py,280,newton,function,,yes
+src/tyredeg/openf1_loading.py,74,OpenF1Client,class,,n/a
+src/tyredeg/openf1_loading.py,116,OpenF1Client.cache_path,method,"Parameters, Returns, Raises, Example",no
+src/tyredeg/openf1_loading.py,125,OpenF1Client.get,method,,yes
+src/tyredeg/openf1_loading.py,202,race_date_utc,function,"Parameters, Returns, Example",yes
+src/tyredeg/openf1_loading.py,228,find_race_session,function,"Parameters, Returns, Example",yes
+src/tyredeg/openf1_loading.py,285,build_laps_rows,function,,yes
+src/tyredeg/openf1_loading.py,366,load_openf1_laps,function,,yes
+src/tyredeg/performance.py,66,machine_info,function,Raises,n/a
+src/tyredeg/performance.py,95,TimingResult,class,Example,n/a
+src/tyredeg/performance.py,117,time_function,function,,yes
+src/tyredeg/performance.py,181,peak_memory,function,"Parameters, Returns",yes
+src/tyredeg/performance.py,213,euler_step_flops,function,"Parameters, Returns, Raises",no
+src/tyredeg/performance.py,229,heun_step_flops,function,"Parameters, Returns, Raises",no
+src/tyredeg/performance.py,248,rk4_step_flops,function,"Parameters, Returns, Raises",no
+src/tyredeg/performance.py,276,rk45_attempt_flops,function,"Parameters, Returns, Raises",no
+src/tyredeg/performance.py,311,solver_flops,function,,yes
+src/tyredeg/performance.py,357,short_path,function,"Parameters, Returns, Raises",no
+src/tyredeg/performance.py,384,profile_function,function,Raises,yes
+src/tyredeg/preparation.py,31,PreparedLaps,class,Example,n/a
+src/tyredeg/preparation.py,50,prepare_laps,function,,yes
+src/tyredeg/race_control.py,50,messages_from_records,function,,yes
+src/tyredeg/race_control.py,95,to_naive_utc,function,,yes
+src/tyredeg/race_control.py,209,non_green_intervals,function,,yes
+src/tyredeg/race_control.py,270,is_green_lap,function,Raises,no
+src/tyredeg/sensitivity.py,45,SensitivityResult,class,Example,n/a
+src/tyredeg/sensitivity.py,67,sensitivity_coefficient,function,,yes
+src/tyredeg/sensitivity.py,118,step_size_check,function,"Parameters, Raises",yes
+src/tyredeg/sensitivity.py,143,one_at_a_time,function,Raises,no
+src/tyredeg/sensitivity.py,172,tornado_table,function,Raises,no
+src/tyredeg/sensitivity.py,208,plot_tornado,function,"Parameters, Raises, Example",no
+src/tyredeg/sensitivity.py,231,degradation_rate_vs_fuel,function,Raises,yes
+src/tyredeg/strategy.py,58,CompoundModel,class,Example,n/a
+src/tyredeg/strategy.py,88,LinearDegradation,class,,n/a
+src/tyredeg/strategy.py,110,LinearDegradation.degradation,method,docstring,yes
+src/tyredeg/strategy.py,147,stint_time,function,"Parameters, Returns, Raises",yes
+src/tyredeg/strategy.py,166,fuel_effect_total,function,"Parameters, Returns, Raises",no
+src/tyredeg/strategy.py,177,total_race_time,function,,yes
+src/tyredeg/strategy.py,228,race_time,function,,yes
+src/tyredeg/strategy.py,307,cumulative_degradation,function,,yes
+src/tyredeg/strategy.py,357,race_time_continuous,function,"Parameters, Returns",yes
+src/tyredeg/strategy.py,394,StrategyResult,class,Example,n/a
+src/tyredeg/strategy.py,432,feasible_pit_laps,function,"Parameters, Raises",no
+src/tyredeg/strategy.py,454,optimise_brute_force,function,"Parameters, Returns",yes
+src/tyredeg/strategy.py,484,optimise_continuous,function,,yes
+src/tyredeg/strategy.py,582,optimise_two_stop,function,,yes
+src/tyredeg/strategy.py,636,compare_strategies,function,"Parameters, Raises",yes
+src/tyredeg/strategy.py,694,max_stint_from_data,function,"Parameters, Returns, Raises",yes
+src/tyredeg/strategy.py,711,compound_pace_delta,function,,yes
+src/tyredeg/strategy.py,770,StrategyInputs,class,Example,n/a
+src/tyredeg/strategy.py,809,refuel,function,"Parameters, Returns, Raises",yes
+src/tyredeg/strategy.py,827,build_strategy_inputs,function,,yes
+src/tyredeg/tyre_allocation.py,36,compound_number,function,"Parameters, Returns",yes
+src/tyredeg/tyre_allocation.py,75,load_allocation,function,,yes
+src/tyredeg/tyre_allocation.py,119,add_pirelli_compound,function,,yes
+src/tyredeg/validation.py,66,rmse,function,"Parameters, Returns, Raises",yes
+src/tyredeg/validation.py,81,mae,function,"Parameters, Returns, Raises",yes
+src/tyredeg/validation.py,93,max_abs_error,function,"Parameters, Returns, Raises",yes
+src/tyredeg/validation.py,105,bias,function,"Parameters, Returns, Raises",yes
+src/tyredeg/validation.py,120,r_squared,function,"Parameters, Returns, Raises",yes
+src/tyredeg/validation.py,139,compute_metrics,function,"Parameters, Returns",yes
+src/tyredeg/validation.py,166,Fold,class,Example,n/a
+src/tyredeg/validation.py,180,leave_one_race_out,function,,yes
+src/tyredeg/validation.py,209,holdout_split,function,"Parameters, Returns",yes
+src/tyredeg/validation.py,230,fold_masks,function,"Parameters, Returns",yes
+src/tyredeg/validation.py,262,ModelSpec,class,Example,n/a
+src/tyredeg/validation.py,286,candidate_models,function,Raises,yes
+src/tyredeg/validation.py,326,predict_held_out,function,,yes
+src/tyredeg/validation.py,400,predict_held_out_loop,function,"Parameters, Returns, Raises",yes
+src/tyredeg/validation.py,433,fit_on,function,Raises,yes
+src/tyredeg/validation.py,455,cross_validate,function,Raises,yes
+src/tyredeg/validation.py,504,summarize_folds,function,"Parameters, Returns, Raises",no
+src/tyredeg/validation.py,536,select_models,function,,yes
+src/tyredeg/validation.py,593,MonotonicCheck,class,Example,n/a
+src/tyredeg/validation.py,602,check_monotonic,function,Raises,yes
+src/tyredeg/validation.py,633,rank_compounds,function,Raises,no
+src/tyredeg/validation.py,661,binned_residuals,function,"Parameters, Raises",no
+src/tyredeg/validation.py,688,FuelDiagnostic,class,Example,n/a
+src/tyredeg/validation.py,699,leftover_fuel_effect,function,,yes
+src/tyredeg/validation.py,788,FirewallError,class,Example,n/a
+src/tyredeg/validation.py,792,write_selection,function,Raises,no
+src/tyredeg/validation.py,820,guard_cv_rerun,function,Parameters,yes
+src/tyredeg/validation.py,845,load_selection,function,"Parameters, Returns",yes
+src/tyredeg/validation.py,867,guard_test_run,function,Parameters,yes

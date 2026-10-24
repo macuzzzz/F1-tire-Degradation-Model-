@@ -132,9 +132,11 @@ def plot_two_stop(models, total_laps, pit_loss, k_fuel, add_fuel, ranking):
     plt.close(fig)
 
 
-def main():
+def main(config=None):
+    """Run this stage; ``config`` defaults to the repository's config.yaml (used by run_pipeline.py)."""
     logging.getLogger("fastf1").setLevel(logging.ERROR)
-    config = load_config(REPO_ROOT / "config.yaml")
+    if config is None:
+        config = load_config(REPO_ROOT / "config.yaml")
     strategy = config.strategy
     models, total_laps, pit_loss, pit_info, deltas, info, clean = build_inputs(config)
     k_fuel, add_fuel = config.k_fuel, strategy.add_fuel_effect
