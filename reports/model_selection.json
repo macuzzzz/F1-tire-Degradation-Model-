@@ -1,0 +1,46 @@
+{
+  "created_utc": "2026-10-24T11:40:30+00:00",
+  "training_races": [
+    "2022 Hungarian Grand Prix",
+    "2023 Hungarian Grand Prix",
+    "2024 Hungarian Grand Prix"
+  ],
+  "test_races_not_used": [
+    "2025 Hungarian Grand Prix"
+  ],
+  "compounds": [
+    "C3",
+    "C4"
+  ],
+  "anchor_laps": 3,
+  "k_fuel": 0.046,
+  "git_commit": "7f7d6ebb25a091bb0b64132285dd892d754f6496",
+  "rule": "best per family by mean LORO RMSE, then simplest accepted family winner within one SE of the best (D48, D51)",
+  "selection": {
+    "C3": {
+      "family_winners": {
+        "polynomial": "polynomial degree 1",
+        "wear_ode": "wear ODE",
+        "knn": "knn k=100 uniform"
+      },
+      "selected": "polynomial degree 1",
+      "best_rmse": 0.6327043913485286,
+      "best_rmse_se": 0.09131167576138129,
+      "threshold": 0.72401606710991,
+      "n_training_laps": 1991,
+      "n_training_stints": 87
+    },
+    "C4": {
+      "family_winners": {
+        "polynomial": "polynomial degree 1",
+        "knn": "knn k=100 uniform"
+      },
+      "selected": "polynomial degree 1",
+      "best_rmse": 0.8507965000465635,
+      "best_rmse_se": 0.15542919486770176,
+      "threshold": 1.0062256949142652,
+      "n_training_laps": 921,
+      "n_training_stints": 55
+    }
+  }
+}
