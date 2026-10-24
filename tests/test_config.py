@@ -37,6 +37,7 @@ def valid_raw_config():
         "numerics": copy.deepcopy(PROJECT_RAW["numerics"]),
         "verification": copy.deepcopy(PROJECT_RAW["verification"]),
         "models": copy.deepcopy(PROJECT_RAW["models"]),
+        "validation": copy.deepcopy(PROJECT_RAW["validation"]),
     }
 
 
@@ -57,7 +58,7 @@ def test_project_config_file_is_valid():
     config = load_config(REPO_ROOT / "config.yaml")
     assert isinstance(config, Config)
     assert config.session == "R"
-    assert config.pirelli_compounds == ("C3",)
+    assert config.pirelli_compounds == ("C3", "C4")  # D52 adds C4
     assert config.teams is None  # all teams (D6 amendment)
     assert (REPO_ROOT / config.allocation_file).is_file()
     # Phase 2 values (D19-D22)
@@ -184,6 +185,31 @@ def test_invalid_models_values_are_rejected(path, value, error):
     for key in path[:-1]:
         target = target[key]
     target[path[-1]] = value
+    with pytest.raises(error):
+        config_from_dict(raw)
+
+
+def test_validation_section_values():
+    validation = load_config(REPO_ROOT / "config.yaml").validation
+    assert validation.anchor_laps == 3
+    assert validation.max_abs_bias_s_per_lap == 0.10
+    assert validation.monotonic_tolerance_s == 0.05
+    assert validation.selection_file == Path("reports/model_selection.json")
+
+
+@pytest.mark.parametrize(
+    "key, value, error",
+    [
+        ("anchor_laps", 0, ValueError),
+        ("anchor_laps", 2.5, TypeError),
+        ("max_abs_bias_s_per_lap", 0.0, ValueError),
+        ("monotonic_tolerance_s", -0.1, ValueError),
+        ("selection_file", "", ValueError),
+    ],
+)
+def test_invalid_validation_values_are_rejected(key, value, error):
+    raw = valid_raw_config()
+    raw["validation"][key] = value
     with pytest.raises(error):
         config_from_dict(raw)
 

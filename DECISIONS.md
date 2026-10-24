@@ -755,7 +755,147 @@ All evidence uses the **training races only**: Hungary 2022–2024, 1,991 clean 
 
 ---
 
+# Phase 5: validation and model comparison
+
+**Statement for the report:** model selection used leave-one-race-out cross-validation on the training races only (Hungary 2022, 2023, 2024). The cross-validation stage never loads the 2025 test race; `scripts/compare_models.py --stage cv` asserts this. The selection was frozen in `reports/model_selection.json` (timestamp and git commit inside) **before** any test evaluation (D55).
+
+All numbers below come from `reports/phase5_cv_summary.csv` and the other `reports/phase5_*.csv` files.
+
+## D47: Metrics
+- Phase / date: Phase 5 / 2026-10-24
+- Options considered: RMSE or MAE as the primary metric.
+- Decision: **RMSE is primary.** Also reported: MAE, max |error|, R² and bias (the mean of predicted − actual) [s/lap].
+- Justification:
+  - RMSE is what least squares minimises, so selection and fitting agree, and it penalises large misses.
+  - Bias matters because strategy adds lap times together.
+  - R² is inflated by the anchored base pace (even the baseline gets a large R²), so it is not used for selection.
+- Source / evidence: n/a.
+- How it is validated: `test_metrics_hand_computed` and `test_metrics_second_example` (worked by hand in the test comments).
+- Proposed by AI, approved by me.
+
+## D48: Cross-validation scheme and selection rule
+- Phase / date: Phase 5 / 2026-10-24
+- Options considered: (a) leave one race out; (b) grouped 5-fold by stint.
+- Decision:
+  - **Scheme (a):** leave one race out on the training races, 3 folds. Splits are by race, never by random lap; the reason is written as a comment in `validation.py`.
+  - **Selection rule:**
+    1. Best hyperparameter per family by mean CV RMSE.
+    2. Among the family winners that pass D51, the **simplest within one standard error of the best** (Hastie, Tibshirani & Friedman, *ESL* §7.10 — **to verify**). Complexity: polynomial degree d → d; wear ODE → 2; KNN → 10.
+  - Only accepted candidates (D51) are eligible. This combination was implied by the proposal and is recorded here explicitly.
+  - **ODE solver tolerance is not tuned:** every solver gives the same b (D41).
+- Justification: Leaving out a whole race mirrors the real use: predicting a race the models haven't seen.
+- Source / evidence (CV):
+
+  | | C3 | C4 |
+  |---|---|---|
+  | Selected | polynomial degree 1 | polynomial degree 1 |
+  | Mean CV RMSE | 0.633 ± 0.091 s | 0.851 ± 0.155 s |
+  | Other family winners | wear ODE 0.633; KNN k = 100 uniform 0.639 | KNN k = 100 uniform 0.851 (nominally best, but the polynomial is simpler and within 1 SE) |
+
+- How it is validated: `test_leave_one_race_out_folds_are_disjoint_and_complete`, `test_cross_validation_never_trains_on_the_held_out_race`, `test_one_standard_error_rule_prefers_simpler_model`.
+- Proposed by AI, approved by me.
+
+## D49: Predicting a held-out stint
+- Phase / date: Phase 5 / 2026-10-24
+- Options considered: (a) anchor on the stint's first m laps; (b) the median training offset; (c) an offset from all the stint's laps (leaks).
+- Decision: **(a) with m = 3.** Offset = mean(lap time − d(age)) over the first 3 clean laps; only the remaining laps are scored.
+- Justification: m trades the anchor error (≈ 0.45/√m) against laps left to score. The minimum stint length of 10 (D20) leaves at least 7 laps. It also matches a real race.
+- Source / evidence (exploratory, polynomial degree 1, C3): CV RMSE 0.723 s at m = 1, **0.633 s at m = 3**, 0.594 s at m = 5.
+- How it is validated: `test_anchored_prediction_is_exact_for_noise_free_data`, `test_anchor_uses_only_the_first_laps`.
+- Proposed by AI, approved by me.
+
+## D50: Baseline
+- Phase / date: Phase 5 / 2026-10-24
+- Options considered: n/a.
+- Decision: a **no-degradation, constant-pace model** (d = 0), anchored exactly like the others. Every candidate must beat it in every fold.
+- Justification: It shows what modelling degradation is worth.
+- Source / evidence: baseline CV RMSE **1.168 s (C3), 1.132 s (C4)**; bias −0.87 and −0.63 s/lap, because it misses the wear. Every real candidate beat it in every fold.
+- How it is validated: `test_cross_validation_recovers_degradation_and_beats_baseline`.
+- Proposed by AI, approved by me.
+
+## D51: Acceptance criteria
+- Phase / date: Phase 5 / 2026-10-24
+- Options considered: n/a.
+- Decision: a candidate is **accepted** if all of these hold:
+  1. it beats the baseline in every fold;
+  2. **|mean CV bias| ≤ 0.10 s/lap**;
+  3. it passes both physical checks (D53).
+- Justification: 0.10 s/lap over a 35-lap stint is 3.5 s, about the pit-loss IQR (3.0 s, D24). So the model's error is no bigger than an uncertainty the strategy already carries.
+- Source / evidence:
+
+  | Compound | Accepted | Not accepted, and why |
+  |---|---|---|
+  | C3 | polynomial degrees 1–3, wear ODE, KNN k = 50, 100, 200 uniform | KNN k = 10, 25 (not monotonic); KNN k = 400 (bias −0.19); all distance-weighted KNN (not monotonic) |
+  | C4 | polynomial degree 1, KNN k = 100 uniform | wear ODE (+0.129) and polynomial degree 2 (+0.134) (bias); polynomial degree 3 and most KNN (not monotonic) |
+
+  Caveat: individual folds can exceed 0.10 s/lap — the largest per-fold bias is 0.18 s/lap for C3 polynomial degree 1 and 0.33 for C4. This is reported in `bias_max_abs_fold`.
+- How it is validated: the `accepted` column in `phase5_cv_summary.csv`; `summarize_folds` is tested.
+- Proposed by AI, approved by me.
+
+## D52: Compounds in scope (amends D4)
+- Phase / date: Phase 5 / 2026-10-24
+- Options considered: C3 only; add C4; add C2/C5.
+- Decision: **model C3 and C4** (`pirelli_compounds: ["C3", "C4"]`), each fitted and cross-validated separately.
+  - C2 is excluded: only 2022 has it, so leave-one-race-out is impossible.
+  - C5 is excluded: 24 clean laps in the training races.
+- Justification: The ranking needs two compounds, and Phase 6 needs two different compounds for a legal one-stop race (this resolves OI-3).
+- Source / evidence:
+  - Clean training laps: C3 1,991 (87 stints); C4 921 (55 stints, data in all 3 races); C2 207 (2022 only); C5 24.
+  - **Ranking** (linear rate, 95% bootstrap CI): C4 0.0714 s/lap [0.060, 0.087]; C3 0.0705 s/lap [0.065, 0.077]. **The two rates are not statistically distinguishable**; the ranking is reported, not forced.
+- How it is validated: `test_rank_compounds_reports_without_forcing_an_order`; `reports/phase5_compound_ranking.csv`.
+- Proposed by AI, approved by me.
+
+## D53: Physical-consistency thresholds
+- Phase / date: Phase 5 / 2026-10-24
+- Options considered: monotonicity tolerance (a) 0; (b) 0.05 s; (c) 0.1 s.
+- Decision:
+  - Non-negative: d ≥ −0.01 s (as D43), on ages 0 … max.
+  - Increasing: d(n+1) ≥ d(n) − **0.05 s** on a 1-lap grid.
+- Justification: 0.05 s is about the noise in an average over one tyre age (0.45/√59).
+- Source / evidence:
+  - KNN with small k, or with distance weighting, drops by 0.08–0.62 s at sparsely sampled old ages, and fails.
+  - The polynomial degree 1 and wear-ODE curves only ever increase.
+- How it is validated: `test_monotonic_check`; the columns `monotonic_ok` and `largest_drop`.
+- Proposed by AI, approved by me.
+
+## D54: Residual analysis and the leftover fuel effect
+- Phase / date: Phase 5 / 2026-10-24
+- Options considered: (a) residuals against lap number only; (b) also a diagnostic model with one offset per driver per race.
+- Decision:
+  - **Plots:** CV residuals of the selected model against tyre age and against lap number (binned means ± 2 SE): `reports/figures/phase5_residuals.png`, `phase5_residual_bins.csv`.
+  - **Fuel diagnostic:** one offset per driver per race, a tyre-age slope per compound, plus a lap-number coefficient (= leftover fuel effect). Bootstrap that resamples whole driver-races (the units that own an offset; this is the stint bootstrap's principle applied to this model), B = 200, seed 42.
+- Justification: Within a stint, lap number and tyre age both rise by 1 per lap, so with per-stint offsets a residual-vs-lap-number slope is 0 by construction (exploratory: exactly 0.00000).
+- Source / evidence:
+  - **Leftover fuel effect: +0.00076 s/lap, 95% CI [−0.0031, +0.0042]** (58 driver-races). Not flagged, so k_fuel = 0.046 is supported.
+  - C3 residuals stay within about ±0.2 s across tyre ages.
+  - **C4 residuals reach +0.6 to +1.3 s beyond about 25 laps of tyre age** (see OI-6).
+- How it is validated: `test_leftover_fuel_effect_is_recovered` (a planted 0.02 s/lap is recovered and flagged), `test_no_leftover_fuel_effect_is_not_flagged`, `test_binned_residuals`.
+- Proposed by AI, approved by me.
+
+## D55: Test-set firewall
+- Phase / date: Phase 5 / 2026-10-24
+- Options considered: n/a.
+- Decision:
+  - **Two stages** in `scripts/compare_models.py`. `--stage cv` loads only the training races, asserts that no test year is present, and writes `reports/model_selection.json` (selection, training races, test races *not used*, k_fuel, anchor, UTC timestamp, git commit).
+  - `--stage test` refuses without that file (`FirewallError`), fits the frozen family winners and the baseline on all training races, and scores 2025 **once**.
+  - **A repeat needs `--force`.** Every test run is appended to `reports/test_runs.log`.
+- Justification: Makes it possible to state, with evidence, that the test data did not influence model selection.
+- Source / evidence: `reports/model_selection.json` was written by the CV run on 2026-10-24.
+- How it is validated: `test_test_stage_refuses_without_selection`, `test_selection_round_trip`, `test_test_run_happens_once_unless_forced`.
+- Proposed by AI, approved by me.
+
+---
+
 # Open issues (need my decision)
+
+## OI-6: The linear C4 model over-predicts degradation on old tyres (Phase 5 residuals)
+CV residuals of the selected C4 model (polynomial degree 1) are about +0.6 to
++1.3 s beyond about 25 laps of tyre age: the data level off at about 2.2 s while
+the line keeps rising. This may be partly selection (only drivers managing their
+tyres ran C4 that long; few laps there). Consequence for Phase 6: the strategy
+will be too pessimistic about long C4 stints. To decide in Phase 6, e.g.
+restrict C4 stint lengths to the validated range, or add this to the
+sensitivity analysis.
 
 ## OI-1: F1 timing data now requires an F1 TV login (resolved by D14: free sources)
 Since about 15 Oct 2026, `livetiming.formula1.com/static` returns HTTP 401 to

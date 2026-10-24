@@ -38,9 +38,11 @@ data:
   # null = keep every driver. (D6)
   drivers: null
 
-  # Pirelli compound(s) to model, C0 (hardest) ... C6 (softest). (D4: C3)
+  # Pirelli compound(s) to model, C0 (hardest) ... C6 (softest).
+  # D4: C3; D52 (Phase 5) adds C4 for the compound ranking and the Phase 6
+  # one-stop strategy (two different compounds are compulsory).
   # At Hungary C3 was the MEDIUM in 2022 and the HARD in 2023-2025.
-  pirelli_compounds: ["C3"]
+  pirelli_compounds: ["C3", "C4"]
 
   # Table mapping each race's SOFT/MEDIUM/HARD to Pirelli compounds, with a
   # source URL per row. Public information, committed to git. (D16)
@@ -197,3 +199,21 @@ models:
   # Stint (cluster) bootstrap for parameter uncertainty. (D45)
   bootstrap_resamples: 200
   confidence_level: 0.95
+
+# =============================================================================
+# Phase 5: validation and model comparison. (D47-D55)
+# Model selection uses leave-one-race-out CV on the TRAINING races only; the
+# test race is evaluated once, after the selection file has been written.
+# =============================================================================
+validation:
+  # Each held-out stint's base pace is anchored on its first this-many clean
+  # laps; only the remaining laps are scored. (D49)
+  anchor_laps: 3
+  # Acceptance: |mean CV bias| at most this [s/lap]. (D51)
+  max_abs_bias_s_per_lap: 0.10
+  # Monotonicity: d(n+1) >= d(n) - tolerance on a 1-lap grid [s]. (D53)
+  monotonic_tolerance_s: 0.05
+  # Test-set firewall files. (D55)
+  selection_file: reports/model_selection.json
+  test_results_file: reports/phase5_test_results.csv
+  test_run_log: reports/test_runs.log

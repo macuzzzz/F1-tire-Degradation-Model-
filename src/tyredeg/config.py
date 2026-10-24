@@ -239,6 +239,18 @@ class ModelSettings:
 
 
 @dataclass(frozen=True)
+class ValidationSettings:
+    """Phase 5 validation settings (``validation`` section, D47-D55)."""
+
+    anchor_laps: int
+    max_abs_bias_s_per_lap: float
+    monotonic_tolerance_s: float
+    selection_file: Path
+    test_results_file: Path
+    test_run_log: Path
+
+
+@dataclass(frozen=True)
 class Config:
     """Validated project configuration.
 
@@ -266,6 +278,7 @@ class Config:
     numerics: NumericsSettings
     verification: VerificationSettings
     models: ModelSettings
+    validation: ValidationSettings
 
     @property
     def train_races(self):
@@ -528,6 +541,26 @@ def _parse_models(raw):
     )
 
 
+def _parse_validation(raw):
+    """Validate the ``validation`` section (Phase 5)."""
+    section = _require_section(raw, "validation")
+    name = "validation"
+
+    def path(key):
+        return Path(_require_string(_require_key(section, key, name), f"{name}.{key}"))
+
+    return ValidationSettings(
+        anchor_laps=_require_int(_require_key(section, "anchor_laps", name), f"{name}.anchor_laps", 1),
+        max_abs_bias_s_per_lap=_positive_float(section, "max_abs_bias_s_per_lap", name),
+        monotonic_tolerance_s=_require_float(
+            _require_key(section, "monotonic_tolerance_s", name), f"{name}.monotonic_tolerance_s", 0.0
+        ),
+        selection_file=path("selection_file"),
+        test_results_file=path("test_results_file"),
+        test_run_log=path("test_run_log"),
+    )
+
+
 def config_from_dict(raw):
     """Build a validated :class:`Config` from a plain dictionary.
 
@@ -643,6 +676,7 @@ def config_from_dict(raw):
         numerics=_parse_numerics(raw),
         verification=_parse_verification(raw),
         models=_parse_models(raw),
+        validation=_parse_validation(raw),
     )
 
 
