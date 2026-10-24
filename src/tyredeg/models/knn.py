@@ -111,6 +111,11 @@ class KNNRegressor:
         ------
         ValueError
             For empty/mismatched/non-finite inputs, or k larger than n.
+
+        Example
+        -------
+        >>> KNNRegressor(k=2).fit([0.0, 1.0, 3.0], [0.0, 1.0, 3.0]).k
+        2
         """
         X = _as_feature_matrix(X, "X")
         y = np.asarray(y, dtype=float).reshape(-1)
@@ -162,6 +167,12 @@ class KNNRegressor:
             Before ``fit``.
         ValueError
             For invalid queries or a feature-count mismatch.
+
+        Example
+        -------
+        >>> knn = KNNRegressor(k=2, weights="distance").fit([0.0, 1.0, 3.0], [0.0, 1.0, 3.0])
+        >>> knn.predict([0.25, 3.0]).round(6).tolist()
+        [0.25, 3.0]
         """
         if self._X is None:
             raise NotFittedError("Call fit() before predict().")
@@ -240,6 +251,13 @@ class KNNDegradationModel:
         ------
         ValueError
             For invalid inputs, too few laps, or k > number of laps.
+
+        Example
+        -------
+        >>> ages = np.tile(np.arange(1.0, 21.0), 3)
+        >>> model = KNNDegradationModel("C3", k=3).fit(ages, 80.0 + 0.1 * ages, [0] * 20 + [1] * 20 + [2] * 20)
+        >>> model.params()["n_stints"]
+        3
         """
         data = prepare_stint_data(tyre_age, lap_time, stint_id)
         check_degrees_of_freedom(data, 1)
@@ -269,10 +287,21 @@ class KNNDegradationModel:
         Returns
         -------
         numpy.ndarray
+            Degradation [s], one value per age.
 
         Raises
         ------
-        NotFittedError, ValueError
+        NotFittedError
+            Before ``fit``.
+        ValueError
+            For negative, NaN or infinite ages.
+
+        Example
+        -------
+        >>> ages = np.tile(np.arange(1.0, 21.0), 3)
+        >>> model = KNNDegradationModel("C3", k=3).fit(ages, 80.0 + 0.1 * ages, [0] * 20 + [1] * 20 + [2] * 20)
+        >>> model.degradation([5.0, 15.0]).round(6).tolist()
+        [0.5, 1.5]
         """
         self._require_fitted()
         return self._knn.predict(check_tyre_age(tyre_age))
@@ -280,9 +309,31 @@ class KNNDegradationModel:
     def predict(self, tyre_age, base_time=None):
         """Predicted lap time [s] = base_time + d(tyre_age); base default = median offset.
 
+        Parameters
+        ----------
+        tyre_age : float or array_like
+            Tyre age(s) [laps], >= 0.
+        base_time : float or None, optional
+            New-tyre lap time [s], > 0. None uses the median stint offset.
+
+        Returns
+        -------
+        numpy.ndarray
+            Predicted fuel-corrected lap times [s], one per age.
+
         Raises
         ------
-        NotFittedError, ValueError
+        NotFittedError
+            Before ``fit``.
+        ValueError
+            For invalid ages or a non-positive ``base_time``.
+
+        Example
+        -------
+        >>> ages = np.tile(np.arange(1.0, 21.0), 3)
+        >>> model = KNNDegradationModel("C3", k=3).fit(ages, 80.0 + 0.1 * ages, [0] * 20 + [1] * 20 + [2] * 20)
+        >>> model.predict([10.0], base_time=85.0).round(6).tolist()
+        [86.0]
         """
         self._require_fitted()
         base = self.base_time if base_time is None else float(base_time)
@@ -330,6 +381,14 @@ class KNNDegradationModel:
         Raises
         ------
         NotFittedError
+            Before ``fit``.
+
+        Example
+        -------
+        >>> ages = np.tile(np.arange(1.0, 21.0), 3)
+        >>> model = KNNDegradationModel("C3", k=3).fit(ages, 80.0 + 0.1 * ages, [0] * 20 + [1] * 20 + [2] * 20)
+        >>> model.params()["k"], model.params()["negative_degradation_flag"]
+        (3, False)
         """
         self._require_fitted()
         return {
@@ -347,7 +406,26 @@ class KNNDegradationModel:
         }
 
     def summary(self):
-        """Human-readable report (str)."""
+        """Human-readable report (str).
+
+        Returns
+        -------
+        str
+            Three lines: settings, training data range and base time, and the
+            non-negative degradation check.
+
+        Raises
+        ------
+        NotFittedError
+            Before ``fit``.
+
+        Example
+        -------
+        >>> ages = np.tile(np.arange(1.0, 21.0), 3)
+        >>> model = KNNDegradationModel("C3", k=3).fit(ages, 80.0 + 0.1 * ages, [0] * 20 + [1] * 20 + [2] * 20)
+        >>> print(model.summary().splitlines()[0])
+        KNN degradation model, compound C3, k = 3, weights = uniform
+        """
         p = self.params()
         status = "VIOLATED" if p["negative_degradation_flag"] else "ok"
         return "\n".join([

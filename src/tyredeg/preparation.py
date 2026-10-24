@@ -40,6 +40,14 @@ class PreparedLaps:
         Laps that passed every cleaning rule, plus a ``StintId`` column.
     cleaning_report : pandas.DataFrame
         Laps removed per rule (see :func:`tyredeg.cleaning.clean_laps`).
+
+    Example
+    -------
+    >>> from tyredeg.config import load_config
+    >>> config = load_config("config.yaml")
+    >>> prepared = prepare_laps(config, config.test_races)  # doctest: +SKIP
+    >>> len(prepared.clean)  # 2025 race (needs downloaded data)  # doctest: +SKIP
+    1229
     """
 
     all_laps: pd.DataFrame

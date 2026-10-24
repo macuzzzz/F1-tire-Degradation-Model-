@@ -441,7 +441,10 @@ class WearODEModel:
 
         Raises
         ------
-        NotFittedError, ValueError
+        NotFittedError
+            Before ``fit``.
+        ValueError
+            For an invalid input (see Parameters).
 
         Example
         -------
@@ -466,7 +469,10 @@ class WearODEModel:
 
         Raises
         ------
-        NotFittedError, ValueError
+        NotFittedError
+            Before ``fit``.
+        ValueError
+            For an invalid input (see Parameters).
 
         Example
         -------
@@ -528,7 +534,10 @@ class WearODEModel:
 
         Raises
         ------
-        NotFittedError, ValueError
+        NotFittedError
+            Before ``fit``.
+        ValueError
+            For an invalid input (see Parameters).
 
         Example
         -------
@@ -563,6 +572,7 @@ class WearODEModel:
         Raises
         ------
         NotFittedError
+            Before ``fit``.
 
         Example
         -------
@@ -593,7 +603,26 @@ class WearODEModel:
         }
 
     def summary(self):
-        """Human-readable report of the fit (str)."""
+        """Human-readable report of the fit (str).
+
+        Returns
+        -------
+        str
+            Lines with the data size, base time, a and b with their standard
+            errors, the b search, the ODE check and the non-negative check.
+
+        Raises
+        ------
+        NotFittedError
+            Before ``fit``.
+
+        Example
+        -------
+        >>> ages = np.tile(np.arange(1.0, 21.0), 3)
+        >>> model = WearODEModel("C3").fit(ages, 80.0 + 0.05 * ages + 0.01 * np.cos(ages), [0] * 20 + [1] * 20 + [2] * 20)
+        >>> print(model.summary().splitlines()[0])
+        Wear-ODE degradation model dd/dn = a + b d, compound C3, solver rk4
+        """
         p = self.params()
         lines = [
             f"Wear-ODE degradation model dd/dn = a + b d, compound {p['compound']}, solver {p['solver']}",

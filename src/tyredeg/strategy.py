@@ -68,6 +68,23 @@ class CompoundModel:
         New-tyre lap time [s] for the typical car, fuel-corrected to full fuel.
     max_stint_laps : int
         Longest allowed stint on this compound [laps] (D63).
+
+    Raises
+    ------
+    TypeError
+        If ``model`` has no ``degradation`` method.
+    ValueError
+        If ``base_time`` is not a positive number of seconds or
+        ``max_stint_laps`` is not an integer >= 1.
+
+    Example
+    -------
+    >>> CompoundModel("C3", LinearDegradation(0.06), 85.0, 40).max_stint_laps
+    40
+    >>> CompoundModel("C3", LinearDegradation(0.06), -1.0, 40)
+    Traceback (most recent call last):
+    ...
+    ValueError: base_time must be a positive number of seconds, got -1.0.
     """
 
     compound: str
@@ -108,7 +125,32 @@ class LinearDegradation:
         self.rate = float(rate)
 
     def degradation(self, tyre_age):
-        return self.rate * np.asarray(tyre_age, dtype=float).reshape(-1)
+        """Degradation rate * tyre_age [s].
+
+        Parameters
+        ----------
+        tyre_age : float or array_like
+            Tyre age(s) [laps], finite and >= 0.
+
+        Returns
+        -------
+        numpy.ndarray
+            Degradation [s], one value per age (1-D).
+
+        Raises
+        ------
+        ValueError
+            For negative, NaN or infinite ages.
+
+        Example
+        -------
+        >>> LinearDegradation(0.05).degradation([0.0, 20.0]).tolist()
+        [0.0, 1.0]
+        """
+        ages = np.asarray(tyre_age, dtype=float).reshape(-1)
+        if not np.all(np.isfinite(ages)) or np.any(ages < 0):
+            raise ValueError("tyre_age must contain finite values >= 0 [laps].")
+        return self.rate * ages
 
 
 def _check_int(value, name, minimum):
@@ -149,6 +191,25 @@ def stint_time(compound_model, n_laps):
 
     = n_laps * base + d(1) + d(2) + ... + d(n_laps)
 
+    Parameters
+    ----------
+    compound_model : CompoundModel
+        The compound of the stint.
+    n_laps : int
+        Stint length [laps], >= 0 (0 gives 0 s).
+
+    Returns
+    -------
+    float
+        Stint time [s], without the fuel effect.
+
+    Raises
+    ------
+    TypeError
+        If ``compound_model`` is not a CompoundModel or ``n_laps`` is not an integer.
+    ValueError
+        If ``n_laps`` is negative.
+
     Example
     -------
     >>> class Linear:
@@ -157,6 +218,9 @@ def stint_time(compound_model, n_laps):
     >>> stint_time(CompoundModel("C3", Linear(), 80.0, 40), 3)   # 240 + 0.1 (1 + 2 + 3)
     240.6
     """
+    if not isinstance(compound_model, CompoundModel):
+        raise TypeError(f"compound_model must be a CompoundModel, got {type(compound_model).__name__}.")
+    n_laps = _check_int(n_laps, "n_laps", 0)
     if n_laps == 0:
         return 0.0
     ages = np.arange(1.0, n_laps + 1.0)
@@ -166,11 +230,36 @@ def stint_time(compound_model, n_laps):
 def fuel_effect_total(total_laps, k_fuel):
     """Total time saved by burning fuel over the race: k_fuel N (N - 1) / 2 [s].
 
+    Lap n is k_fuel (n - 1) faster than lap 1, and the sum of (n - 1) over
+    n = 1..N is N (N - 1) / 2.
+
+    Parameters
+    ----------
+    total_laps : int
+        Race length N [laps], >= 1.
+    k_fuel : float
+        Fuel coefficient [s per lap of fuel], finite and >= 0.
+
+    Returns
+    -------
+    float
+        Time saved [s], rounded to 12 decimals (removes round-off noise).
+
+    Raises
+    ------
+    TypeError
+        If ``total_laps`` is not an integer.
+    ValueError
+        If ``total_laps`` < 1 or ``k_fuel`` is negative or not finite.
+
     Example
     -------
     >>> fuel_effect_total(70, 0.046)   # 0.046 * 70 * 69 / 2
     111.09
     """
+    total_laps = _check_int(total_laps, "total_laps", 1)
+    if isinstance(k_fuel, bool) or not np.isfinite(k_fuel) or k_fuel < 0:
+        raise ValueError(f"k_fuel must be a finite number >= 0, got {k_fuel!r}.")
     return float(round(k_fuel * total_laps * (total_laps - 1) / 2.0, 12))
 
 
@@ -362,6 +451,28 @@ def race_time_continuous(pit_lap, compound_1, compound_2, models, total_laps, pi
     :func:`cumulative_degradation`; equal to it at integer L for linear models.
     Stint limits are not applied here (they are applied after rounding).
 
+    Parameters
+    ----------
+    pit_lap : float
+        Real-valued pit lap L, 0 < L < total_laps.
+    compound_1, compound_2 : str
+        Compounds of stint 1 and stint 2; different and both in ``models``.
+    models : dict
+        {compound: CompoundModel}.
+    total_laps : int
+        Race length [laps], >= 2.
+    pit_loss : float
+        Time lost by the stop [s], > 0.
+    k_fuel : float, optional
+        Fuel coefficient [s per lap of fuel], >= 0. Default 0.
+    add_fuel_effect : bool, optional
+        Real race time (True, default) or a fuel-corrected one.
+
+    Returns
+    -------
+    float
+        Relaxed race time [s].
+
     Raises
     ------
     ValueError
@@ -371,7 +482,10 @@ def race_time_continuous(pit_lap, compound_1, compound_2, models, total_laps, pi
 
     Example
     -------
-    >>> race_time_continuous(32.5, "C3", "C4", models, 70, 20.9)  # doctest: +SKIP
+    >>> models = {"C3": CompoundModel("C3", LinearDegradation(0.06), 85.0, 40),
+    ...           "C4": CompoundModel("C4", LinearDegradation(0.055), 84.9, 35)}
+    >>> round(race_time_continuous(32.5, "C3", "C4", models, 70, 20.9, 0.046), 6)
+    5928.425625
     """
     total_laps = _check_race_inputs(models, total_laps, pit_loss, k_fuel)
     _check_compounds((compound_1, compound_2), models)
@@ -414,6 +528,17 @@ class StrategyResult:
     constraint_active : bool
         True if the stint limits moved the optimum away from the unconstrained one.
     note : str
+        Explanation when a method fell back or a constraint was active.
+    extra : dict
+        Method-specific details (e.g. the root-finder history).
+
+    Example
+    -------
+    >>> models = {"C3": CompoundModel("C3", LinearDegradation(0.06), 85.0, 40),
+    ...           "C4": CompoundModel("C4", LinearDegradation(0.055), 84.9, 35)}
+    >>> result = optimise_brute_force("C3", "C4", models, 70, 20.9, 0.046)
+    >>> result.pit_laps, result.stint_lengths, result.method
+    ((35,), (35, 35), 'brute force')
     """
 
     compounds: tuple
@@ -432,10 +557,26 @@ class StrategyResult:
 def feasible_pit_laps(compound_1, compound_2, models, total_laps):
     """Integer pit laps for which both stints respect their limits (D63).
 
+    Parameters
+    ----------
+    compound_1, compound_2 : str
+        Compounds of stint 1 and stint 2, both in ``models``.
+    models : dict
+        {compound: CompoundModel}.
+    total_laps : int
+        Race length [laps], >= 2.
+
     Returns
     -------
     numpy.ndarray of int
         Possibly empty if no one-stop race is feasible.
+
+    Raises
+    ------
+    TypeError
+        If ``models`` is not a non-empty dict or ``total_laps`` is not an integer.
+    ValueError
+        If a compound is unknown or ``total_laps`` < 2.
 
     Example
     -------
@@ -446,6 +587,12 @@ def feasible_pit_laps(compound_1, compound_2, models, total_laps):
     >>> feasible_pit_laps("C3", "C4", models, 70).tolist()   # C3 <= 40 laps, C4 <= 35 laps
     [35, 36, 37, 38, 39, 40]
     """
+    if not isinstance(models, dict) or not models:
+        raise TypeError("models must be a non-empty dict {compound: CompoundModel}.")
+    total_laps = _check_int(total_laps, "total_laps", 2)
+    for compound in (compound_1, compound_2):
+        if compound not in models:
+            raise ValueError(f"Unknown compound {compound!r}; available: {sorted(models)}.")
     low = max(1, total_laps - models[compound_2].max_stint_laps)
     high = min(total_laps - 1, models[compound_1].max_stint_laps)
     return np.arange(low, high + 1)
@@ -455,6 +602,26 @@ def optimise_brute_force(compound_1, compound_2, models, total_laps, pit_loss, k
                          add_fuel_effect=True):
     """Try every feasible integer pit lap; return the fastest (the reference method).
 
+    Parameters
+    ----------
+    compound_1, compound_2 : str
+        Compounds of stint 1 and stint 2; different and both in ``models``.
+    models : dict
+        {compound: CompoundModel}.
+    total_laps : int
+        Race length [laps], >= 2.
+    pit_loss : float
+        Time lost by the stop [s], > 0.
+    k_fuel : float, optional
+        Fuel coefficient [s per lap of fuel], >= 0. Default 0.
+    add_fuel_effect : bool, optional
+        Real race time (True, default) or a fuel-corrected one.
+
+    Returns
+    -------
+    StrategyResult
+        ``method == "brute force"``; ``iterations`` = number of candidates.
+
     Raises
     ------
     ValueError
@@ -462,7 +629,11 @@ def optimise_brute_force(compound_1, compound_2, models, total_laps, pit_loss, k
 
     Example
     -------
-    >>> optimise_brute_force("C3", "C4", models, 70, 20.9, 0.046)  # doctest: +SKIP
+    >>> models = {"C3": CompoundModel("C3", LinearDegradation(0.06), 85.0, 40),
+    ...           "C4": CompoundModel("C4", LinearDegradation(0.055), 84.9, 35)}
+    >>> result = optimise_brute_force("C3", "C4", models, 70, 20.9, 0.046)
+    >>> result.pit_laps, round(result.total_time, 6), result.iterations
+    ((35,), 5928.76, 6)
     """
     total_laps = _check_race_inputs(models, total_laps, pit_loss, k_fuel)
     _check_compounds((compound_1, compound_2), models)
@@ -637,6 +808,23 @@ def compare_strategies(models, total_laps, pit_loss, k_fuel=0.0, add_fuel_effect
                        include_two_stop=True, xtol=1e-6, ftol=0.0):
     """Optimise every one-stop compound order (all methods) and, optionally, two-stop sequences.
 
+    Parameters
+    ----------
+    models : dict
+        {compound: CompoundModel}; at least two compounds.
+    total_laps : int
+        Race length [laps], >= 2.
+    pit_loss : float
+        Time lost per stop [s], > 0.
+    k_fuel : float, optional
+        Fuel coefficient [s per lap of fuel], >= 0. Default 0.
+    add_fuel_effect : bool, optional
+        Real race times (True, default) or fuel-corrected ones.
+    include_two_stop : bool, optional
+        Also enumerate two-stop sequences (default True).
+    xtol, ftol : float, optional
+        Root-finder tolerances for the continuous methods [laps], >= 0.
+
     Returns
     -------
     methods : pandas.DataFrame
@@ -645,9 +833,19 @@ def compare_strategies(models, total_laps, pit_loss, k_fuel=0.0, add_fuel_effect
         One row per strategy (best result), sorted fastest first, with the
         gap to the fastest [s].
 
+    Raises
+    ------
+    TypeError, ValueError
+        For invalid models, race length, pit loss or fuel coefficient
+        (see :func:`race_time`).
+
     Example
     -------
-    >>> methods, ranking = compare_strategies(models, 70, 20.9, 0.046)  # doctest: +SKIP
+    >>> models = {"C3": CompoundModel("C3", LinearDegradation(0.06), 85.0, 40),
+    ...           "C4": CompoundModel("C4", LinearDegradation(0.055), 84.9, 35)}
+    >>> methods, ranking = compare_strategies(models, 70, 20.9, 0.046)
+    >>> ranking[["strategy", "pit_laps"]].head(2).values.tolist()
+    [['C3 -> C4 -> C4', '21 & 45'], ['C4 -> C4 -> C3', '24 & 49']]
     """
     rows = []
     compounds = sorted(models)
@@ -694,12 +892,34 @@ def _result_row(result, kind):
 def max_stint_from_data(tyre_age, min_laps):
     """Largest tyre age [laps] with at least ``min_laps`` clean laps (D63).
 
+    Parameters
+    ----------
+    tyre_age : array_like of float
+        Tyre age [laps] of every clean lap of one compound, finite and >= 0.
+    min_laps : int
+        Minimum number of laps observed at an age, >= 1 (config: 5).
+
+    Returns
+    -------
+    int
+        The stint limit [laps] (largest supported age, rounded down).
+
+    Raises
+    ------
+    TypeError
+        If ``min_laps`` is not an integer.
+    ValueError
+        If ``tyre_age`` is empty or invalid, ``min_laps`` < 1, or no age has
+        ``min_laps`` laps.
+
     Example
     -------
     >>> max_stint_from_data([1, 1, 2, 2, 3], min_laps=2)
     2
     """
-    ages = np.asarray(tyre_age, dtype=float)
+    ages = np.asarray(tyre_age, dtype=float).reshape(-1)
+    if ages.size == 0 or not np.all(np.isfinite(ages)) or np.any(ages < 0):
+        raise ValueError("tyre_age must be a non-empty array of finite ages >= 0 [laps].")
     _check_int(min_laps, "min_laps", 1)
     values, counts = np.unique(ages, return_counts=True)
     supported = values[counts >= min_laps]
@@ -785,6 +1005,12 @@ class StrategyInputs:
         One row per compound: model, laps, stints, stint limit, rate, base time.
     k_fuel : float
         Fuel coefficient used for the fuel correction [s per lap of fuel].
+
+    Example
+    -------
+    >>> inputs = build_strategy_inputs(prepared.all_laps, prepared.clean, config, names)  # doctest: +SKIP
+    >>> inputs.total_laps, round(inputs.pit_loss, 2)  # 2023-2025 Hungary (needs data)  # doctest: +SKIP
+    (70, 20.89)
     """
 
     models: dict
@@ -812,6 +1038,27 @@ def refuel(laps, k_fuel):
     Cleaning does not depend on k_fuel (the outlier rule uses raw times, D19),
     so only this column changes.
 
+    Parameters
+    ----------
+    laps : pandas.DataFrame
+        Laps with LapTime [s], LapNumber and TotalLaps (and usually the old
+        FuelCorrectedTime, which is replaced).
+    k_fuel : float
+        New fuel coefficient [s per lap of fuel], >= 0.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A copy with the new FuelCorrectedTime [s].
+
+    Raises
+    ------
+    TypeError
+        If ``laps`` is not a DataFrame.
+    ValueError
+        For missing columns, invalid lap data or a negative ``k_fuel``
+        (see :func:`tyredeg.fuel_correction.add_fuel_corrected_times`).
+
     Example
     -------
     >>> df = pd.DataFrame({"LapTime": [80.0], "LapNumber": [11.0], "TotalLaps": [70.0],
@@ -821,7 +1068,9 @@ def refuel(laps, k_fuel):
     """
     from tyredeg.fuel_correction import add_fuel_corrected_times
 
-    return add_fuel_corrected_times(laps.drop(columns=["FuelCorrectedTime"]), k_fuel)
+    if not isinstance(laps, pd.DataFrame):
+        raise TypeError(f"laps must be a DataFrame, got {type(laps).__name__}.")
+    return add_fuel_corrected_times(laps.drop(columns=["FuelCorrectedTime"], errors="ignore"), k_fuel)
 
 
 def build_strategy_inputs(all_laps, clean, config, model_names, k_fuel=None, min_laps_at_max_age=None,

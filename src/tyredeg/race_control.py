@@ -286,6 +286,11 @@ def is_green_lap(lap_start, lap_time_s, intervals):
         **or if its start time or lap time is missing**: a lap whose timing is
         unknown cannot be shown to be green, so it is treated as not green.
 
+    Raises
+    ------
+    ValueError
+        If ``lap_time_s`` is negative.
+
     Example
     -------
     >>> start = pd.Timestamp("2023-07-23 13:19:00")
@@ -297,6 +302,8 @@ def is_green_lap(lap_start, lap_time_s, intervals):
     """
     if lap_start is None or pd.isna(lap_start) or lap_time_s is None or pd.isna(lap_time_s):
         return False
+    if lap_time_s < 0:
+        raise ValueError(f"lap_time_s must be >= 0 s, got {lap_time_s}.")
     lap_end = lap_start + pd.Timedelta(seconds=float(lap_time_s))
     for window_start, window_end in intervals:
         # Two time ranges overlap if each one starts before the other ends.

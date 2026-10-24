@@ -56,19 +56,49 @@ ROUNDOFF_STEPS = 4
 
 
 class NoSignChangeError(ValueError):
-    """Bisection was given an interval where f does not change sign."""
+    """Bisection was given an interval where f does not change sign.
+
+    Example
+    -------
+    >>> bisection(lambda x: x**2 + 1, -1.0, 1.0)
+    Traceback (most recent call last):
+    ...
+    tyredeg.numerics.root_finding.NoSignChangeError: f(a) = 2.0 and f(b) = 2.0 have the same sign; no bracket.
+    """
 
 
 class ZeroDerivativeError(ValueError):
-    """Newton hit f'(x) = 0, or secant hit f(x_k) = f(x_{k-1}): no step possible."""
+    """Newton hit f'(x) = 0, or secant hit f(x_k) = f(x_{k-1}): no step possible.
+
+    Example
+    -------
+    >>> newton(lambda x: x**2 - 1, lambda x: 2 * x, 0.0)
+    Traceback (most recent call last):
+    ...
+    tyredeg.numerics.root_finding.ZeroDerivativeError: f'(x) = 0 at x = 0.0; Newton step undefined.
+    """
 
 
 class DivergenceError(ValueError):
-    """An iterate became non-finite or larger than the divergence limit."""
+    """An iterate became non-finite or larger than the divergence limit.
+
+    Example
+    -------
+    >>> issubclass(DivergenceError, ValueError)
+    True
+    """
 
 
 class NotConvergedError(ValueError):
-    """The tolerance was not reached within max_iter iterations."""
+    """The tolerance was not reached within max_iter iterations.
+
+    Example
+    -------
+    >>> bisection(lambda x: x - 0.3, 0.0, 1.0, max_iter=3)
+    Traceback (most recent call last):
+    ...
+    tyredeg.numerics.root_finding.NotConvergedError: bisection did not converge in 3 iterations.
+    """
 
 
 @dataclass(frozen=True)
@@ -84,6 +114,12 @@ class RootResult:
     history : numpy.ndarray
         Every iterate in order (bisection: the midpoints; secant: including
         both starting points; Newton: including the starting point).
+
+    Example
+    -------
+    >>> result = bisection(lambda x: x**2 - 2, 0.0, 2.0)
+    >>> round(result.root, 10), result.iterations
+    (1.4142135624, 39)
     """
 
     root: float

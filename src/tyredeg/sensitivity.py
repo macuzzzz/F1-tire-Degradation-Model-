@@ -55,6 +55,12 @@ class SensitivityResult:
         dy/dx (units of y per unit of x).
     elasticity : float
         (dy/dx) x0 / y0 (dimensionless); NaN if x0 or y0 is 0.
+
+    Example
+    -------
+    >>> result = sensitivity_coefficient(lambda x: 100.0 + 2.0 * x, 5.0, absolute_step=0.1)
+    >>> round(result.derivative, 9), round(result.elasticity, 9)
+    (2.0, 0.090909091)
     """
 
     x0: float
@@ -122,10 +128,25 @@ def step_size_check(func, x0, relative_steps):
     error or straddles a kink. Agreement across steps shows the estimate is
     trustworthy.
 
+    Parameters
+    ----------
+    func : callable
+        Scalar function y = func(x).
+    x0 : float
+        Nominal input, finite and != 0 (the steps are relative to it).
+    relative_steps : sequence of float
+        Relative steps to compare, each > 0 (config: 0.001, 0.01, 0.1).
+
     Returns
     -------
     pandas.DataFrame
         Columns relative_step, step, derivative.
+
+    Raises
+    ------
+    ValueError
+        If ``relative_steps`` is empty, or for an invalid ``x0`` or step
+        (see :func:`sensitivity_coefficient`).
 
     Example
     -------
@@ -133,6 +154,8 @@ def step_size_check(func, x0, relative_steps):
     >>> table["derivative"].round(9).tolist()
     [2.0, 2.0]
     """
+    if len(relative_steps) == 0:
+        raise ValueError("relative_steps must contain at least one step.")
     rows = []
     for relative in relative_steps:
         result = sensitivity_coefficient(func, x0, relative_step=relative)
@@ -157,16 +180,36 @@ def one_at_a_time(evaluate, variations):
         One row per variation plus a first "nominal" row; columns input,
         label, then every output.
 
+    Raises
+    ------
+    TypeError
+        If ``evaluate`` is not callable, a variation is not an
+        (input, label, overrides) triple with a dict of overrides, or
+        ``evaluate`` does not return a dict.
+
     Example
     -------
     >>> f = lambda x=1.0: {"y": 2 * x}
     >>> one_at_a_time(f, [("x", "low", {"x": 0.5})])["y"].tolist()
     [2.0, 1.0]
     """
-    rows = [{"input": "nominal", "label": "nominal", **evaluate()}]
-    for name, label, overrides in variations:
-        rows.append({"input": name, "label": label, **evaluate(**overrides)})
+    if not callable(evaluate):
+        raise TypeError("evaluate must be callable: evaluate(**overrides) -> dict.")
+    rows = [{"input": "nominal", "label": "nominal", **_outputs(evaluate)}]
+    for variation in variations:
+        if not (isinstance(variation, (tuple, list)) and len(variation) == 3 and isinstance(variation[2], dict)):
+            raise TypeError(f"Each variation must be (input, label, overrides dict), got {variation!r}.")
+        name, label, overrides = variation
+        rows.append({"input": name, "label": label, **_outputs(evaluate, overrides)})
     return pd.DataFrame(rows)
+
+
+def _outputs(evaluate, overrides=None):
+    """Call ``evaluate`` and check that it returns a dict of outputs."""
+    outputs = evaluate(**(overrides or {}))
+    if not isinstance(outputs, dict):
+        raise TypeError(f"evaluate must return a dict of outputs, got {type(outputs).__name__}.")
+    return outputs
 
 
 def tornado_table(oat, output):
@@ -185,6 +228,14 @@ def tornado_table(oat, output):
         Columns input, low, high, low_change, high_change (relative to the
         nominal), span = high - low.
 
+    Raises
+    ------
+    TypeError
+        If ``oat`` is not a DataFrame.
+    ValueError
+        If ``oat`` lacks the ``input`` or ``output`` column, or does not have
+        exactly one "nominal" row.
+
     Example
     -------
     >>> oat = pd.DataFrame({"input": ["nominal", "a", "a", "b"], "label": ["n", "l", "h", "h"],
@@ -192,7 +243,15 @@ def tornado_table(oat, output):
     >>> tornado_table(oat, "y")["input"].tolist()
     ['a', 'b']
     """
-    nominal = float(oat[oat["input"] == "nominal"][output].iloc[0])
+    if not isinstance(oat, pd.DataFrame):
+        raise TypeError(f"oat must be a DataFrame, got {type(oat).__name__}.")
+    missing = [column for column in ("input", output) if column not in oat.columns]
+    if missing:
+        raise ValueError(f"oat is missing columns: {missing}")
+    nominal_rows = oat[oat["input"] == "nominal"]
+    if len(nominal_rows) != 1:
+        raise ValueError(f"oat must have exactly one 'nominal' row, found {len(nominal_rows)}.")
+    nominal = float(nominal_rows[output].iloc[0])
     rows = []
     for name, group in oat[oat["input"] != "nominal"].groupby("input", sort=False):
         values = group[output].astype(float).dropna()
@@ -206,7 +265,46 @@ def tornado_table(oat, output):
 
 
 def plot_tornado(table, nominal, title, xlabel, path):
-    """Horizontal tornado bars (largest span on top), saved to ``path``."""
+    """Horizontal tornado bars (largest span on top), saved to ``path``.
+
+    Parameters
+    ----------
+    table : pandas.DataFrame
+        Output of :func:`tornado_table` (columns input, low_change, high_change).
+    nominal : float
+        Nominal value of the output, where the bars start (output units).
+    title : str
+        Figure title.
+    xlabel : str
+        Label of the x axis, with the output's unit.
+    path : str or pathlib.Path
+        Where to save the PNG file (the folder must exist).
+
+    Raises
+    ------
+    TypeError
+        If ``table`` is not a DataFrame.
+    ValueError
+        If ``table`` is empty, lacks a required column, or ``nominal`` is not finite.
+
+    Example
+    -------
+    >>> import pathlib, tempfile
+    >>> table = pd.DataFrame({"input": ["a"], "low_change": [-1.0], "high_change": [2.0]})
+    >>> with tempfile.TemporaryDirectory() as folder:
+    ...     plot_tornado(table, 10.0, "Example", "output [s]", pathlib.Path(folder) / "t.png")
+    ...     (pathlib.Path(folder) / "t.png").exists()
+    True
+    """
+    if not isinstance(table, pd.DataFrame):
+        raise TypeError(f"table must be a DataFrame, got {type(table).__name__}.")
+    missing = [column for column in ("input", "low_change", "high_change") if column not in table.columns]
+    if missing:
+        raise ValueError(f"table is missing columns: {missing}")
+    if table.empty:
+        raise ValueError("table is empty; there is nothing to plot.")
+    if not np.isfinite(nominal):
+        raise ValueError(f"nominal must be finite, got {nominal}.")
     import matplotlib
 
     matplotlib.use("Agg")
@@ -256,12 +354,22 @@ def degradation_rate_vs_fuel(clean, compound, k_values, nominal_k):
     slope : float
         d(rate)/dk from a straight-line fit (my least squares).
 
+    Raises
+    ------
+    ValueError
+        If there are no laps of ``compound``, fewer than 2 values in
+        ``k_values`` (a slope needs two points), or a negative fuel coefficient.
+
     Example
     -------
     >>> rates, slope = degradation_rate_vs_fuel(clean, "C3", [0.0, 0.046, 0.07], 0.046)  # doctest: +SKIP
     >>> round(slope, 6)  # doctest: +SKIP
     1.0
     """
+    if len(k_values) < 2:
+        raise ValueError("k_values needs at least 2 fuel coefficients to estimate a slope.")
+    if min(k_values) < 0 or nominal_k < 0:
+        raise ValueError("Fuel coefficients must be >= 0 s per lap of fuel.")
     laps = clean[clean["PirelliCompound"] == compound]
     if laps.empty:
         raise ValueError(f"No laps of compound {compound}.")

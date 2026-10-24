@@ -88,6 +88,11 @@ class RaceNotFoundError(ValueError):
     """The requested event does not exist, or the source matched a different event.
 
     Subclasses ``ValueError`` because the cause is a bad input (the event name).
+
+    Example
+    -------
+    >>> issubclass(RaceNotFoundError, ValueError)
+    True
     """
 
 
@@ -96,6 +101,11 @@ class RaceDataUnavailableError(RuntimeError):
 
     Subclasses ``RuntimeError`` because the cause is outside the caller's
     control (network, missing data on the server, access restrictions, ...).
+
+    Example
+    -------
+    >>> issubclass(RaceDataUnavailableError, RuntimeError)
+    True
     """
 
 
@@ -105,6 +115,11 @@ class RaceDataUnavailableError(RuntimeError):
 def validate_year(year):
     """Raise if ``year`` is not an int season with lap timing data (>= 2018).
 
+    Parameters
+    ----------
+    year : int
+        Championship season, >= 2018.
+
     Raises
     ------
     TypeError
@@ -112,6 +127,14 @@ def validate_year(year):
         ``True`` is an ``int`` in Python).
     ValueError
         If ``year`` is earlier than 2018.
+
+    Example
+    -------
+    >>> validate_year(2023)          # valid: returns None
+    >>> validate_year(2010)
+    Traceback (most recent call last):
+    ...
+    ValueError: year must be >= 2018 (no lap timing data before then), got 2010.
     """
     if isinstance(year, bool) or not isinstance(year, int):
         raise TypeError(f"year must be an int, got {year!r}.")
@@ -123,7 +146,28 @@ def validate_year(year):
 
 
 def validate_event(event):
-    """Raise ``TypeError``/``ValueError`` if ``event`` is not a non-empty string."""
+    """Raise if ``event`` is not a non-empty string.
+
+    Parameters
+    ----------
+    event : str
+        Event name, e.g. ``"Hungarian Grand Prix"``.
+
+    Raises
+    ------
+    TypeError
+        If ``event`` is not a string.
+    ValueError
+        If ``event`` is empty or only spaces.
+
+    Example
+    -------
+    >>> validate_event("Hungarian Grand Prix")   # valid: returns None
+    >>> validate_event("  ")
+    Traceback (most recent call last):
+    ...
+    ValueError: event must not be empty.
+    """
     if not isinstance(event, str):
         raise TypeError(f"event must be a str, got {type(event).__name__}.")
     if event.strip() == "":
@@ -131,7 +175,26 @@ def validate_event(event):
 
 
 def validate_session(session):
-    """Raise ``ValueError`` if ``session`` is not a supported identifier (only "R")."""
+    """Raise if ``session`` is not a supported session identifier.
+
+    Parameters
+    ----------
+    session : str
+        Session identifier; only ``"R"`` (race) is supported.
+
+    Raises
+    ------
+    ValueError
+        If ``session`` is anything other than ``"R"``.
+
+    Example
+    -------
+    >>> validate_session("R")   # valid: returns None
+    >>> validate_session("Q")
+    Traceback (most recent call last):
+    ...
+    ValueError: session must be one of ('R',), got 'Q'.
+    """
     if session not in SUPPORTED_SESSIONS:
         raise ValueError(f"session must be one of {SUPPORTED_SESSIONS}, got {session!r}.")
 
@@ -283,10 +346,20 @@ def unknown_total_laps():
     A named function (rather than a bare ``float("nan")``) makes it explicit
     in the calling code that no number is being guessed; later phases use
     ``race.total_laps_override`` from config.yaml instead.
+
+    Returns
+    -------
+    float
+        NaN.
+
+    Raises
+    ------
+    Nothing: the function takes no input.
+
+    Example
+    -------
+    >>> import math
+    >>> math.isnan(unknown_total_laps())
+    True
     """
     return float("nan")
-
-
-def is_missing(value):
-    """Return True for None/NaN/NaT (pandas' notion of a missing value)."""
-    return bool(pd.isna(value))

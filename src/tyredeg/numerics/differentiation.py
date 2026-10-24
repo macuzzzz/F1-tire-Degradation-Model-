@@ -66,11 +66,20 @@ def default_step(x, exponent):
     float or numpy.ndarray
         Step size(s) > 0.
 
+    Raises
+    ------
+    ValueError
+        If ``x`` is not finite or ``exponent`` is not > 0.
+
     Example
     -------
     >>> float(default_step(1.0, 0.5)) == float(np.sqrt(np.finfo(float).eps))
     True
     """
+    if not np.all(np.isfinite(np.asarray(x, dtype=float))):
+        raise ValueError("x must be finite.")
+    if not exponent > 0:
+        raise ValueError(f"exponent must be > 0, got {exponent}.")
     return EPS**exponent * np.maximum(1.0, np.abs(np.asarray(x, dtype=float)))
 
 
@@ -146,7 +155,26 @@ def forward_difference(f, x, h=None):
 def backward_difference(f, x, h=None):
     """First derivative of f at x by the backward difference (error O(h)).
 
-    Parameters, returns and raises as for :func:`forward_difference`.
+    Parameters
+    ----------
+    f : callable
+        Function of x; must accept arrays if ``x`` is an array.
+    x : float or array_like
+        Point(s), finite.
+    h : float or None, optional
+        Step > 0. Default ``sqrt(eps) * max(1, |x|)`` (D32).
+
+    Returns
+    -------
+    float or numpy.ndarray
+        Approximation of f'(x).
+
+    Raises
+    ------
+    TypeError
+        If ``f`` is not callable.
+    ValueError
+        If ``x`` is not finite or ``h`` is not > 0.
 
     Example
     -------
@@ -165,8 +193,26 @@ def central_difference(f, x, h=None):
     The O(h) error terms of the forward and backward formulas have opposite
     signs and cancel in their average, which is the central formula.
 
-    Parameters, returns and raises as for :func:`forward_difference`; the
-    default step is ``eps**(1/3) * max(1, |x|)``.
+    Parameters
+    ----------
+    f : callable
+        Function of x; must accept arrays if ``x`` is an array.
+    x : float or array_like
+        Point(s), finite.
+    h : float or None, optional
+        Step > 0. Default ``eps**(1/3) * max(1, |x|)`` (D32).
+
+    Returns
+    -------
+    float or numpy.ndarray
+        Approximation of f'(x).
+
+    Raises
+    ------
+    TypeError
+        If ``f`` is not callable.
+    ValueError
+        If ``x`` is not finite or ``h`` is not > 0.
 
     Example
     -------
@@ -182,8 +228,26 @@ def central_difference(f, x, h=None):
 def central_second_difference(f, x, h=None):
     """Second derivative of f at x by the central difference (error O(h^2)).
 
-    Parameters, returns and raises as for :func:`forward_difference`; the
-    default step is ``eps**(1/4) * max(1, |x|)``.
+    Parameters
+    ----------
+    f : callable
+        Function of x; must accept arrays if ``x`` is an array.
+    x : float or array_like
+        Point(s), finite.
+    h : float or None, optional
+        Step > 0. Default ``eps**(1/4) * max(1, |x|)`` (D32).
+
+    Returns
+    -------
+    float or numpy.ndarray
+        Approximation of f''(x).
+
+    Raises
+    ------
+    TypeError
+        If ``f`` is not callable.
+    ValueError
+        If ``x`` is not finite or ``h`` is not > 0.
 
     Example
     -------
@@ -253,12 +317,23 @@ def forward_difference_samples(x, y):
 def backward_difference_samples(x, y):
     """Backward differences of samples: (y[i] - y[i-1]) / h at x[1] .. x[n-1].
 
-    Parameters and raises as for :func:`forward_difference_samples`.
+    Parameters
+    ----------
+    x : array_like
+        Uniformly spaced, strictly increasing sample points (>= 2).
+    y : array_like
+        Sample values, same length, finite.
 
     Returns
     -------
     numpy.ndarray
         n - 1 derivative estimates, one for each of ``x[1:]``.
+
+    Raises
+    ------
+    ValueError
+        For mismatched lengths, too few samples, non-finite values,
+        non-increasing or non-uniform x.
 
     Example
     -------

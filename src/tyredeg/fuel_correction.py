@@ -258,6 +258,12 @@ class PitLossEstimate:
     stops : pandas.DataFrame
         One row per stop: RaceId, Driver, InLap, InLapTime, OutLapTime,
         MedianCleanTime and PitLoss (all times fuel-corrected, [s]).
+
+    Example
+    -------
+    >>> estimate = PitLossEstimate(20.9, 19.8, 22.3, 105, pd.DataFrame())
+    >>> round(estimate.iqr_s, 6)
+    2.5
     """
 
     median_s: float

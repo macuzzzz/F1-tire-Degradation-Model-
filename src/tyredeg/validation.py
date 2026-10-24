@@ -34,6 +34,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from tyredeg.models.common import check_compound
 from tyredeg.models.knn import KNNDegradationModel
 from tyredeg.models.polynomial import PolynomialDegradationModel
 from tyredeg.models.wear_ode import WearODEModel
@@ -69,6 +70,23 @@ def rmse(actual, predicted):
     The primary metric (D47): it is the quantity least squares minimises and
     it penalises large misses more than small ones.
 
+    Parameters
+    ----------
+    actual : array_like of float
+        Observed lap times [s]; non-empty and finite.
+    predicted : array_like of float
+        Predicted lap times [s]; same length, finite.
+
+    Returns
+    -------
+    float
+        RMSE [s], >= 0.
+
+    Raises
+    ------
+    ValueError
+        For empty, mismatched or non-finite inputs.
+
     Example
     -------
     >>> round(rmse([1, 2, 3, 4], [1, 3, 2, 6]), 6)
@@ -81,6 +99,23 @@ def rmse(actual, predicted):
 def mae(actual, predicted):
     """Mean absolute error mean(|predicted - actual|) [s].
 
+    Parameters
+    ----------
+    actual : array_like of float
+        Observed lap times [s]; non-empty and finite.
+    predicted : array_like of float
+        Predicted lap times [s]; same length, finite.
+
+    Returns
+    -------
+    float
+        MAE [s], >= 0.
+
+    Raises
+    ------
+    ValueError
+        For empty, mismatched or non-finite inputs.
+
     Example
     -------
     >>> mae([1, 2, 3, 4], [1, 3, 2, 6])
@@ -92,6 +127,23 @@ def mae(actual, predicted):
 
 def max_abs_error(actual, predicted):
     """Largest |predicted - actual| [s].
+
+    Parameters
+    ----------
+    actual : array_like of float
+        Observed lap times [s]; non-empty and finite.
+    predicted : array_like of float
+        Predicted lap times [s]; same length, finite.
+
+    Returns
+    -------
+    float
+        Largest absolute error [s], >= 0.
+
+    Raises
+    ------
+    ValueError
+        For empty, mismatched or non-finite inputs.
 
     Example
     -------
@@ -107,6 +159,23 @@ def bias(actual, predicted):
 
     Strategy adds up lap times, so a consistent bias accumulates over a stint
     (0.1 s/lap over 35 laps = 3.5 s); hence the acceptance criterion (D51).
+
+    Parameters
+    ----------
+    actual : array_like of float
+        Observed lap times [s]; non-empty and finite.
+    predicted : array_like of float
+        Predicted lap times [s]; same length, finite.
+
+    Returns
+    -------
+    float
+        Bias [s/lap]; positive when the model predicts slower laps than observed.
+
+    Raises
+    ------
+    ValueError
+        For empty, mismatched or non-finite inputs.
 
     Example
     -------
@@ -124,6 +193,23 @@ def r_squared(actual, predicted):
     lap-time variance, so R^2 is high even for the baseline; it is reported
     but not used for selection (D47).
 
+    Parameters
+    ----------
+    actual : array_like of float
+        Observed lap times [s]; non-empty and finite.
+    predicted : array_like of float
+        Predicted lap times [s]; same length, finite.
+
+    Returns
+    -------
+    float
+        R^2 (dimensionless, <= 1; negative if worse than the mean); NaN if ``actual`` is constant.
+
+    Raises
+    ------
+    ValueError
+        For empty, mismatched or non-finite inputs.
+
     Example
     -------
     >>> round(r_squared([1, 2, 3, 4], [1, 3, 2, 6]), 6)
@@ -138,6 +224,18 @@ def r_squared(actual, predicted):
 
 def compute_metrics(actual, predicted):
     """All metrics as a dict: rmse, mae, max_abs_error, bias, r_squared, n.
+
+    Parameters
+    ----------
+    actual : array_like of float
+        Observed lap times [s]; non-empty and finite.
+    predicted : array_like of float
+        Predicted lap times [s]; same length, finite.
+
+    Returns
+    -------
+    dict
+        rmse, mae, max_abs_error [s], bias [s/lap], r_squared and n (number of laps).
 
     Raises
     ------
@@ -164,7 +262,29 @@ def compute_metrics(actual, predicted):
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class Fold:
-    """One train/test split. Races are identified by their RaceId."""
+    """One train/test split. Races are identified by their RaceId.
+
+    Attributes
+    ----------
+    train_races : tuple of str
+        Races used for fitting.
+    test_races : tuple of str
+        Races used for scoring; none of them may be a training race.
+
+    Raises
+    ------
+    ValueError
+        If a race is in both sets, or either set is empty.
+
+    Example
+    -------
+    >>> Fold(("r1", "r2"), ("r3",)).test_races
+    ('r3',)
+    >>> Fold(("r1",), ("r1",))
+    Traceback (most recent call last):
+    ...
+    ValueError: A race cannot be in both train and test: ['r1'].
+    """
 
     train_races: tuple
     test_races: tuple
@@ -209,6 +329,18 @@ def leave_one_race_out(race_ids):
 def holdout_split(race_ids, test_races):
     """Train on every race except ``test_races``; test on ``test_races``.
 
+    Parameters
+    ----------
+    race_ids : iterable of str
+        Race identifier of every lap (duplicates are ignored).
+    test_races : iterable of str
+        Races to hold out; each must be in ``race_ids``.
+
+    Returns
+    -------
+    Fold
+        Races sorted alphabetically within each set.
+
     Raises
     ------
     ValueError
@@ -230,10 +362,27 @@ def holdout_split(race_ids, test_races):
 def fold_masks(laps, fold, race_column=RACE_COLUMN):
     """Boolean masks (train, test) selecting the laps of a fold's races.
 
+    Parameters
+    ----------
+    laps : pandas.DataFrame
+        Laps with a race-identifier column.
+    fold : Fold
+        The split.
+    race_column : str, optional
+        Name of the race column (default ``"RaceId"``).
+
+    Returns
+    -------
+    train, test : numpy.ndarray of bool
+        One entry per lap.
+
     Raises
     ------
+    TypeError
+        If ``laps`` is not a DataFrame or ``fold`` is not a Fold.
     ValueError
-        If a lap ends up in both sets (impossible with a valid Fold; checked anyway).
+        If the race column is missing, or a lap ends up in both sets
+        (impossible with a valid Fold; checked anyway).
 
     Example
     -------
@@ -241,6 +390,12 @@ def fold_masks(laps, fold, race_column=RACE_COLUMN):
     >>> [m.tolist() for m in fold_masks(laps, Fold(("r1",), ("r2",)))]
     [[True, False], [False, True]]
     """
+    if not isinstance(laps, pd.DataFrame):
+        raise TypeError(f"laps must be a DataFrame, got {type(laps).__name__}.")
+    if not isinstance(fold, Fold):
+        raise TypeError(f"fold must be a Fold, got {type(fold).__name__}.")
+    if race_column not in laps.columns:
+        raise ValueError(f"laps has no {race_column!r} column.")
     train = laps[race_column].isin(fold.train_races).to_numpy()
     test = laps[race_column].isin(fold.test_races).to_numpy()
     if np.any(train & test):
@@ -274,6 +429,13 @@ class ModelSpec:
         The candidate is skipped if a fold has fewer training laps (KNN's k).
     fit : callable
         ``fit(tyre_age, lap_time, stint_id)`` -> object with ``degradation``.
+
+    Example
+    -------
+    >>> from tyredeg.config import load_config
+    >>> specs = candidate_models("C3", load_config("config.yaml").models)
+    >>> [(spec.name, spec.complexity) for spec in specs[:3]]
+    [('baseline (no degradation)', 0), ('polynomial degree 1', 1), ('polynomial degree 2', 2)]
     """
 
     name: str
@@ -300,12 +462,19 @@ def candidate_models(compound, models):
         Complexity: degree d -> d, wear ODE -> 2 (two parameters), KNN -> 10
         (non-parametric, most flexible).
 
+    Raises
+    ------
+    ValueError
+        If ``compound`` is not a valid Pirelli code (C0-C6).
+
     Example
     -------
-    >>> specs = candidate_models("C3", load_config("config.yaml").models)  # doctest: +SKIP
-    >>> specs[0].name  # doctest: +SKIP
-    'baseline (no degradation)'
+    >>> from tyredeg.config import load_config
+    >>> specs = candidate_models("C3", load_config("config.yaml").models)
+    >>> len(specs), specs[0].name
+    (17, 'baseline (no degradation)')
     """
+    check_compound(compound)
     specs = [ModelSpec(BASELINE_NAME, "baseline", 0, 0, lambda a, t, s: _ZeroDegradation())]
     for degree in models.candidate_degrees:
         specs.append(ModelSpec(
@@ -401,12 +570,40 @@ def predict_held_out_loop(model, laps, anchor_laps):
     """Original stint-by-stint version of :func:`predict_held_out` (reference only).
 
     Kept unchanged from Phase 5 so the Phase 8 optimisation can be checked
-    for identical results and timed before/after. Same parameters, returns
-    and errors as :func:`predict_held_out`.
+    for identical results and timed before/after.
+
+    Parameters
+    ----------
+    model : object
+        Fitted model with ``degradation(tyre_age)`` [s].
+    laps : pandas.DataFrame
+        Held-out laps with RaceId, StintId, LapNumber, TyreLife and
+        FuelCorrectedTime [s].
+    anchor_laps : int
+        Number of first laps per stint used to set its base pace, >= 1.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per scored lap: RaceId, StintId, LapNumber, TyreLife,
+        actual, predicted and residual = predicted - actual [s].
+
+    Raises
+    ------
+    ValueError
+        If ``anchor_laps`` is not an integer >= 1, or no stint has more than
+        ``anchor_laps`` laps.
 
     Example
     -------
-    >>> predict_held_out_loop(model, laps, 3)  # doctest: +SKIP
+    >>> laps = pd.DataFrame({"RaceId": "r1", "StintId": "r1|A|1", "LapNumber": [1.0, 2.0, 3.0, 4.0],
+    ...                      "TyreLife": [1.0, 2.0, 3.0, 4.0], "FuelCorrectedTime": [80.1, 80.2, 80.3, 80.5]})
+    >>> class Linear:
+    ...     def degradation(self, n):
+    ...         return 0.1 * np.asarray(n, dtype=float)
+    >>> scored = predict_held_out_loop(Linear(), laps, 3)
+    >>> scored[["actual", "predicted"]].round(6).values.tolist()
+    [[80.5, 80.4]]
     """
     if isinstance(anchor_laps, bool) or not isinstance(anchor_laps, (int, np.integer)) or anchor_laps < 1:
         raise ValueError(f"anchor_laps must be an integer >= 1, got {anchor_laps!r}.")
@@ -436,18 +633,40 @@ def fit_on(spec, laps):
     Parameters
     ----------
     spec : ModelSpec
+        The candidate to fit.
     laps : pandas.DataFrame
-        Laps with TyreLife, FuelCorrectedTime and StintId.
+        Laps with TyreLife [laps], FuelCorrectedTime [s] and StintId.
 
     Returns
     -------
     object
         The fitted model (has ``degradation``).
 
+    Raises
+    ------
+    TypeError
+        If ``spec`` has no callable ``fit`` or ``laps`` is not a DataFrame.
+    ValueError
+        If a required column is missing, or the model's own checks fail.
+
     Example
     -------
-    >>> model = fit_on(spec, training_laps)  # doctest: +SKIP
+    >>> laps = pd.DataFrame({"TyreLife": [1.0, 2.0, 3.0, 1.0, 2.0, 3.0],
+    ...                      "FuelCorrectedTime": [80.0, 80.1, 80.2, 81.0, 81.1, 81.2],
+    ...                      "StintId": ["a", "a", "a", "b", "b", "b"]})
+    >>> from tyredeg.config import load_config
+    >>> spec = candidate_models("C3", load_config("config.yaml").models)[1]
+    >>> spec.name, fit_on(spec, laps).degradation([10.0]).round(6).tolist()
+    ('polynomial degree 1', [1.0])
     """
+    # Any object with a callable ``fit`` works (the tests use a recording stand-in).
+    if not callable(getattr(spec, "fit", None)):
+        raise TypeError(f"spec must be a ModelSpec (with a callable fit), got {type(spec).__name__}.")
+    if not isinstance(laps, pd.DataFrame):
+        raise TypeError(f"laps must be a DataFrame, got {type(laps).__name__}.")
+    missing = [column for column in (AGE_COLUMN, TIME_COLUMN, STINT_COLUMN) if column not in laps.columns]
+    if missing:
+        raise ValueError(f"laps is missing columns: {missing}")
     return spec.fit(laps[AGE_COLUMN].to_numpy(float), laps[TIME_COLUMN].to_numpy(float),
                     laps[STINT_COLUMN].to_numpy())
 
@@ -460,9 +679,11 @@ def cross_validate(laps, spec, folds, anchor_laps, implementation="vectorised"):
     laps : pandas.DataFrame
         Clean laps of ONE compound from the TRAINING races only.
     spec : ModelSpec
+        The candidate to evaluate.
     folds : list of Fold
-        E.g. :func:`leave_one_race_out`.
+        E.g. :func:`leave_one_race_out`; at least one.
     anchor_laps : int
+        First laps per held-out stint used to set its base pace (D49), >= 1.
     implementation : str, optional
         "vectorised" (default, :func:`predict_held_out`) or "loop" (the
         original :func:`predict_held_out_loop`, for the Phase 8 benchmark).
@@ -475,10 +696,25 @@ def cross_validate(laps, spec, folds, anchor_laps, implementation="vectorised"):
     predictions : pandas.DataFrame
         All scored laps of all folds (with a ``fold`` column).
 
+    Raises
+    ------
+    ValueError
+        For an unknown ``implementation``, an empty ``folds`` list, or invalid
+        laps (see :func:`fit_on` and :func:`predict_held_out`).
+
     Example
     -------
-    >>> table, scored = cross_validate(c3_laps, spec, leave_one_race_out(c3_laps["RaceId"]), 3)  # doctest: +SKIP
+    >>> ages = np.tile(np.arange(1.0, 9.0), 6)
+    >>> laps = pd.DataFrame({"RaceId": np.repeat(["r1", "r2", "r3"], 16), "StintId": np.repeat([f"s{i}" for i in range(6)], 8),
+    ...                      "LapNumber": ages, "TyreLife": ages, "FuelCorrectedTime": 80.0 + 0.06 * ages + 0.05 * np.sin(7 * ages)})
+    >>> from tyredeg.config import load_config
+    >>> spec = candidate_models("C3", load_config("config.yaml").models)[1]
+    >>> table, scored = cross_validate(laps, spec, leave_one_race_out(laps["RaceId"]), 3)
+    >>> table[["test_race", "rmse"]].round(6).values.tolist()
+    [['r1', 0.019808], ['r2', 0.019808], ['r3', 0.019808]]
     """
+    if len(folds) == 0:
+        raise ValueError("folds must contain at least one Fold.")
     predictors = {"vectorised": predict_held_out, "loop": predict_held_out_loop}
     if implementation not in predictors:
         raise ValueError(f"implementation must be one of {sorted(predictors)}, got {implementation!r}.")
@@ -508,10 +744,48 @@ def summarize_folds(fold_table, max_abs_bias):
     r_squared_mean, bias_mean, bias_max_abs_fold, beats_baseline_all_folds,
     bias_ok. Candidates not applicable in every fold are dropped.
 
+    Parameters
+    ----------
+    fold_table : pandas.DataFrame
+        The concatenated ``fold_table`` outputs of :func:`cross_validate`
+        for every candidate, including the baseline.
+    max_abs_bias : float
+        Largest accepted |mean bias| [s/lap], >= 0 (config: 0.10).
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per candidate, with the columns listed above.
+
+    Raises
+    ------
+    TypeError
+        If ``fold_table`` is not a DataFrame.
+    ValueError
+        If a required column or the baseline is missing, or ``max_abs_bias`` < 0.
+
     Example
     -------
-    >>> summary = summarize_folds(fold_table, max_abs_bias=0.10)  # doctest: +SKIP
+    >>> ages = np.tile(np.arange(1.0, 9.0), 6)
+    >>> laps = pd.DataFrame({"RaceId": np.repeat(["r1", "r2", "r3"], 16), "StintId": np.repeat([f"s{i}" for i in range(6)], 8),
+    ...                      "LapNumber": ages, "TyreLife": ages, "FuelCorrectedTime": 80.0 + 0.06 * ages + 0.05 * np.sin(7 * ages)})
+    >>> from tyredeg.config import load_config
+    >>> specs = candidate_models("C3", load_config("config.yaml").models)[:2]   # baseline, degree 1
+    >>> tables = [cross_validate(laps, spec, leave_one_race_out(laps["RaceId"]), 3)[0] for spec in specs]
+    >>> summary = summarize_folds(pd.concat(tables), max_abs_bias=0.10)
+    >>> summary[["model", "beats_baseline_all_folds", "bias_ok"]].values.tolist()
+    [['baseline (no degradation)', False, False], ['polynomial degree 1', True, True]]
     """
+    if not isinstance(fold_table, pd.DataFrame):
+        raise TypeError(f"fold_table must be a DataFrame, got {type(fold_table).__name__}.")
+    required = ("model", "family", "fold", "applicable", "rmse", "mae", "max_abs_error", "r_squared", "bias")
+    missing = [column for column in required if column not in fold_table.columns]
+    if missing:
+        raise ValueError(f"fold_table is missing columns: {missing}")
+    if not (fold_table["model"] == BASELINE_NAME).any():
+        raise ValueError(f"fold_table has no {BASELINE_NAME!r} rows; every candidate is compared with it.")
+    if not max_abs_bias >= 0:
+        raise ValueError(f"max_abs_bias must be >= 0 s/lap, got {max_abs_bias}.")
     applicable = fold_table.groupby("model")["applicable"].transform("all")
     table = fold_table[applicable.astype(bool)]
     baseline = table[table["model"] == BASELINE_NAME].set_index("fold")["rmse"]
@@ -591,7 +865,26 @@ def select_models(summary, complexity):
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class MonotonicCheck:
-    """Result of :func:`check_monotonic`."""
+    """Result of :func:`check_monotonic`.
+
+    Attributes
+    ----------
+    largest_drop_s : float
+        Largest fall of d between consecutive tyre ages [s] (negative if d
+        always rises).
+    n_drops_over_tolerance : int
+        Number of consecutive-age drops larger than the tolerance.
+    ok : bool
+        True if there are none.
+    tolerance_s : float
+        The tolerance used [s].
+
+    Example
+    -------
+    >>> check = check_monotonic(lambda n: -0.1 * n, 3.0, 0.05)
+    >>> check.ok, check.n_drops_over_tolerance, round(check.largest_drop_s, 6)
+    (False, 3, 0.1)
+    """
 
     largest_drop_s: float
     n_drops_over_tolerance: int
@@ -616,11 +909,22 @@ def check_monotonic(degradation, max_age, tolerance_s):
     -------
     MonotonicCheck
 
+    Raises
+    ------
+    TypeError
+        If ``degradation`` is not callable.
+    ValueError
+        If ``max_age`` is negative or not finite, or ``tolerance_s`` < 0.
+
     Example
     -------
     >>> check_monotonic(lambda n: 0.07 * n, 40.0, 0.05).ok
     True
     """
+    if not callable(degradation):
+        raise TypeError("degradation must be callable, d(ages) -> degradation [s].")
+    if not np.isfinite(max_age) or max_age < 0:
+        raise ValueError(f"max_age must be a finite number of laps >= 0, got {max_age}.")
     if not tolerance_s >= 0:
         raise ValueError("tolerance_s must be >= 0.")
     ages = np.arange(0.0, np.floor(max_age) + 1.0)
@@ -643,6 +947,13 @@ def rank_compounds(rates):
     pandas.DataFrame
         Same rows sorted by rate (descending) with a ``rank`` column (1 = fastest wear).
 
+    Raises
+    ------
+    TypeError
+        If ``rates`` is not a DataFrame.
+    ValueError
+        If the ``rate`` column is missing.
+
     Example
     -------
     >>> df = pd.DataFrame({"compound": ["C3", "C4"], "rate": [0.07, 0.09],
@@ -650,6 +961,10 @@ def rank_compounds(rates):
     >>> rank_compounds(df)["compound"].tolist()
     ['C4', 'C3']
     """
+    if not isinstance(rates, pd.DataFrame):
+        raise TypeError(f"rates must be a DataFrame, got {type(rates).__name__}.")
+    if "rate" not in rates.columns:
+        raise ValueError("rates has no 'rate' column.")
     ranked = rates.sort_values("rate", ascending=False).reset_index(drop=True)
     ranked.insert(0, "rank", np.arange(1, len(ranked) + 1))
     return ranked
@@ -661,19 +976,42 @@ def rank_compounds(rates):
 def binned_residuals(values, residuals, bin_edges):
     """Mean residual (+/- standard error) in bins of ``values`` (tyre age or lap number).
 
+    A lap belongs to the bin (low, high]: above the lower edge, up to and
+    including the upper edge.
+
+    Parameters
+    ----------
+    values : array_like of float
+        Binning variable of each lap, e.g. tyre age [laps].
+    residuals : array_like of float
+        Residual (predicted - actual) of each lap [s]; same length.
+    bin_edges : sequence of float
+        At least 2 strictly increasing edges.
+
     Returns
     -------
     pandas.DataFrame
         Columns bin_low, bin_high, n, mean, se. A trend across bins shows a
         systematic error the model has not captured.
 
+    Raises
+    ------
+    ValueError
+        If ``values`` and ``residuals`` differ in length, or ``bin_edges`` has
+        fewer than 2 values or is not strictly increasing.
+
     Example
     -------
     >>> binned_residuals([1, 2, 11, 12], [0.1, -0.1, 0.5, 0.7], [0, 10, 20])["mean"].round(3).tolist()
     [0.0, 0.6]
     """
-    values = np.asarray(values, dtype=float)
-    residuals = np.asarray(residuals, dtype=float)
+    values = np.asarray(values, dtype=float).reshape(-1)
+    residuals = np.asarray(residuals, dtype=float).reshape(-1)
+    if values.size != residuals.size:
+        raise ValueError(f"values and residuals differ in length ({values.size} vs {residuals.size}).")
+    edges = np.asarray(bin_edges, dtype=float)
+    if edges.ndim != 1 or edges.size < 2 or np.any(np.diff(edges) <= 0):
+        raise ValueError("bin_edges must contain at least 2 strictly increasing values.")
     rows = []
     for low, high in zip(bin_edges[:-1], bin_edges[1:]):
         inside = (values > low) & (values <= high)
@@ -686,7 +1024,27 @@ def binned_residuals(values, residuals, bin_edges):
 
 @dataclass(frozen=True)
 class FuelDiagnostic:
-    """Leftover fuel effect [s/lap] with a group-bootstrap interval (D54)."""
+    """Leftover fuel effect [s/lap] with a group-bootstrap interval (D54).
+
+    Attributes
+    ----------
+    estimate : float
+        Coefficient on lap number after fuel correction [s/lap]; 0 if the
+        fuel correction is right.
+    standard_error : float
+        Bootstrap standard error [s/lap].
+    lower, upper : float
+        Confidence interval [s/lap].
+    flagged : bool
+        True if the interval excludes 0.
+    n_groups : int
+        Number of driver-races (bootstrap units).
+
+    Example
+    -------
+    >>> FuelDiagnostic(0.0008, 0.002, -0.003, 0.005, False, 120).flagged
+    False
+    """
 
     estimate: float
     standard_error: float
@@ -786,15 +1144,25 @@ def leftover_fuel_effect(laps, compounds, n_resamples, confidence_level, seed):
 # 6. Test-set firewall (D55)
 # ---------------------------------------------------------------------------
 class FirewallError(RuntimeError):
-    """The test stage was called in a way that could leak or repeat the test."""
+    """The test stage was called in a way that could leak or repeat the test.
+
+    Example
+    -------
+    >>> issubclass(FirewallError, RuntimeError)
+    True
+    """
 
 
 def write_selection(path, selection, metadata):
     """Save the CV model selection (JSON) so the test stage can load it unchanged.
 
+    It does not check the firewall itself: callers run :func:`guard_cv_rerun`
+    first (C16).
+
     Parameters
     ----------
     path : str or Path
+        JSON file to write (its folder is created if needed).
     selection : dict
         Per compound: the output of :func:`select_models`.
     metadata : dict
@@ -805,10 +1173,21 @@ def write_selection(path, selection, metadata):
     dict
         What was written.
 
+    Raises
+    ------
+    TypeError
+        If ``selection`` or ``metadata`` is not a dict.
+
     Example
     -------
-    >>> write_selection("reports/model_selection.json", selection, {"git_commit": "abc"})  # doctest: +SKIP
+    >>> import pathlib, tempfile
+    >>> with tempfile.TemporaryDirectory() as folder:
+    ...     content = write_selection(pathlib.Path(folder) / "selection.json", {"C3": {"selected": "x"}}, {})
+    ...     load_selection(pathlib.Path(folder) / "selection.json")["selection"]
+    {'C3': {'selected': 'x'}}
     """
+    if not isinstance(selection, dict) or not isinstance(metadata, dict):
+        raise TypeError("selection and metadata must both be dicts.")
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     content = {"created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
@@ -825,6 +1204,15 @@ def guard_cv_rerun(selection_path, test_results_path, force=False):
     the cross-validation stage would overwrite it with a later timestamp and
     commit, so it is only allowed with ``force`` (added after C16).
 
+    Parameters
+    ----------
+    selection_path : str or Path
+        The frozen ``model_selection.json``.
+    test_results_path : str or Path
+        The test results file; its existence means the test has been run.
+    force : bool, optional
+        Allow the re-run anyway (default False).
+
     Raises
     ------
     FirewallError
@@ -832,7 +1220,15 @@ def guard_cv_rerun(selection_path, test_results_path, force=False):
 
     Example
     -------
-    >>> guard_cv_rerun("reports/model_selection.json", "reports/phase5_test_results.csv")  # doctest: +SKIP
+    >>> import pathlib, tempfile
+    >>> with tempfile.TemporaryDirectory() as folder:
+    ...     selection, results = pathlib.Path(folder) / "s.json", pathlib.Path(folder) / "r.csv"
+    ...     guard_cv_rerun(selection, results)          # nothing frozen yet: allowed
+    ...     _ = selection.write_text("{}"); _ = results.write_text("")
+    ...     guard_cv_rerun(selection, results)
+    Traceback (most recent call last):
+    ...
+    tyredeg.validation.FirewallError: r.csv exists: the test race has already been evaluated, so the frozen s.json must not be overwritten. Use --force only if you deliberately want a new selection (and say so in the report).
     """
     if Path(selection_path).exists() and Path(test_results_path).exists() and not force:
         raise FirewallError(
@@ -844,6 +1240,16 @@ def guard_cv_rerun(selection_path, test_results_path, force=False):
 
 def load_selection(path):
     """Load the CV model selection; refuse if cross-validation has not been run.
+
+    Parameters
+    ----------
+    path : str or Path
+        The ``model_selection.json`` written by :func:`write_selection`.
+
+    Returns
+    -------
+    dict
+        The file's content (``created_utc``, metadata and ``selection``).
 
     Raises
     ------
@@ -870,6 +1276,15 @@ def guard_test_run(results_path, log_path, force=False):
     Every allowed run is appended to ``log_path`` with a timestamp, so a
     repeated (forced) evaluation is always visible.
 
+    Parameters
+    ----------
+    results_path : str or Path
+        The test results file; its existence means the test has been run.
+    log_path : str or Path
+        Log file to which each allowed run is appended.
+    force : bool, optional
+        Allow a repeat (default False); the log marks it as forced.
+
     Raises
     ------
     FirewallError
@@ -877,7 +1292,12 @@ def guard_test_run(results_path, log_path, force=False):
 
     Example
     -------
-    >>> guard_test_run("reports/phase5_test_results.csv", "reports/test_runs.log")  # doctest: +SKIP
+    >>> import pathlib, tempfile
+    >>> with tempfile.TemporaryDirectory() as folder:
+    ...     log = pathlib.Path(folder) / "runs.log"
+    ...     guard_test_run(pathlib.Path(folder) / "results.csv", log)   # first run: allowed and logged
+    ...     log.read_text().endswith("test evaluation\\n")
+    True
     """
     results_path, log_path = Path(results_path), Path(log_path)
     if results_path.exists() and not force:

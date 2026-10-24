@@ -212,8 +212,10 @@ notebooks/             exploration only (currently empty; all logic is in src/)
   least 5 laps observed at that age), and they bind for the one-stop strategy.
 - **Few races.** Three training races give only three cross-validation folds,
   and one test race gives a noisy test metric.
-- **Docstrings.** `scripts/review_api.py` lists public functions whose
-  docstrings still lack a NumPy section (`reports/phase9_api_review.csv`).
+- **Input checks are guards, not proofs.** Every public function has a
+  complete NumPy docstring and checks its inputs (`scripts/review_api.py`,
+  `reports/phase9_api_review.csv`), but the checks cover types, shapes and
+  ranges, not whether the data make physical sense.
 
 The full list of challenges met during the project is in
 [CHALLENGES.md](CHALLENGES.md), and the lessons are summarised in
@@ -230,13 +232,57 @@ The full list of challenges met during the project is in
 
 ## Use of AI
 
-> **To be completed by the student.** Placeholders:
->
-> - Tool(s) used: [tool name and version]
-> - What the AI was used for: [e.g. proposing options for each decision, writing code and tests, drafting documentation]
-> - What I decided and checked myself: [e.g. approved or changed each decision in DECISIONS.md, reviewed the code, ran the tests]
-> - How the results were verified: [e.g. tests against SciPy/scikit-learn benchmarks, hold-out test, reproducibility check]
-> - Limitations of the AI assistance I noticed: [e.g. examples in CHALLENGES.md]
+> **DRAFT written by the AI from the project record. To be checked, corrected
+> and reworded by me before submission.** Items in [brackets] are for me to fill in.
+
+**Tool.** Claude Code (Anthropic) in VS Code, model Claude Opus 5.5, used
+throughout the project (October 2026).
+
+**What the AI did.**
+- Proposed the options for every technical decision, with trade-offs and
+  evidence.
+- Wrote all the code: the from-scratch numerical methods, models, validation,
+  strategy, sensitivity, performance code, the scripts and the tests.
+- Ran the analyses that produced every number in `reports/`.
+- Drafted the documentation (DECISIONS.md, CHALLENGES.md, LESSONS_SUMMARY.md
+  and this README).
+
+**What I decided.**
+- **Phases 1–5 (D1–D55):** the AI listed the options and stopped. I approved
+  each decision or changed it before any code was written. My changes are
+  recorded in DECISIONS.md, for example:
+  - the scope changes (Bahrain/HARD → Hungary/C3, Red Bull only → all teams);
+  - the season range;
+  - asking for a step-size study (N3);
+  - the root-finder stopping rule (D30 amendment).
+- **Phases 6–9 (D56–D88):** I told the AI to decide and implement without
+  asking first. Every one of these decisions is marked "Decided by AI without
+  prior approval, to be reviewed by me". [State which ones I have reviewed,
+  and any I changed.]
+- [Describe how I reviewed the code and checked that I can explain it.]
+
+**How the results were checked.**
+- Every from-scratch method is tested against a benchmark: SciPy,
+  scikit-learn, `numpy.linalg.lstsq` or an analytic solution.
+- The models were selected by leave-one-race-out cross-validation and then
+  tested once on a withheld race (2025), protected by a test firewall (D55).
+- The test suite runs offline: 935 tests and doctests.
+- A reproducibility check compares the SHA-256 hash of every result file
+  between runs (D83).
+
+**Limitations of the AI assistance I noticed** (all logged in CHALLENGES.md):
+- It wrote doctest examples and expected values without running them first,
+  and some failed (C3: placeholder examples that did not load; C11: a wrong
+  hand count).
+- A verification run it started overwrote the frozen model selection; it was
+  restored from git and a guard was added (C16).
+- It leaked my local file paths into generated files three times (C17, C19, C20).
+- It left 126 public objects with incomplete docstrings until a review
+  script found them (C22).
+- Some values rest only on secondary sources, which the AI flagged for me to
+  verify. For example, the 0.03 s/kg fuel figure has no primary source (D22).
+
+[Add my own reflection: what I learned, what I would do differently.]
 
 ## Licence
 

@@ -97,6 +97,19 @@ def _check_laps(laps):
         raise ValueError(f"laps is missing required columns: {missing}")
 
 
+def _check_columns(laps, columns):
+    """Raise if ``laps`` is not a DataFrame containing every name in ``columns``.
+
+    Used by the single-rule masks, which only need their own columns, so they
+    can also be called on a small table (an empty table gives an empty mask).
+    """
+    if not isinstance(laps, pd.DataFrame):
+        raise TypeError(f"laps must be a pandas DataFrame, got {type(laps).__name__}.")
+    missing = [column for column in columns if column not in laps.columns]
+    if missing:
+        raise ValueError(f"laps is missing required columns: {missing}")
+
+
 def _check_outlier_k(outlier_k):
     """Raise if ``outlier_k`` is not a positive number."""
     if isinstance(outlier_k, bool) or not isinstance(outlier_k, (int, float)):
@@ -129,11 +142,19 @@ def missing_lap_time_mask(laps):
     pandas.Series of bool
         True where ``LapTime`` is NaN.
 
+    Raises
+    ------
+    TypeError
+        If ``laps`` is not a DataFrame.
+    ValueError
+        If the ``LapTime`` column is missing.
+
     Example
     -------
     >>> missing_lap_time_mask(pd.DataFrame({"LapTime": [80.0, float("nan")]})).tolist()
     [False, True]
     """
+    _check_columns(laps, ("LapTime",))
     return laps["LapTime"].isna()
 
 
@@ -152,11 +173,19 @@ def first_lap_mask(laps):
     -------
     pandas.Series of bool
 
+    Raises
+    ------
+    TypeError
+        If ``laps`` is not a DataFrame.
+    ValueError
+        If the ``LapNumber`` column is missing.
+
     Example
     -------
     >>> first_lap_mask(pd.DataFrame({"LapNumber": [1.0, 2.0]})).tolist()
     [True, False]
     """
+    _check_columns(laps, ("LapNumber",))
     return laps["LapNumber"] == 1
 
 
@@ -175,6 +204,13 @@ def pit_laps_mask(laps):
     -------
     pandas.Series of bool
 
+    Raises
+    ------
+    TypeError
+        If ``laps`` is not a DataFrame.
+    ValueError
+        If ``IsPitInLap`` or ``IsPitOutLap`` is missing.
+
     Example
     -------
     >>> df = pd.DataFrame({"IsPitInLap": [False, True, False],
@@ -182,6 +218,7 @@ def pit_laps_mask(laps):
     >>> pit_laps_mask(df).tolist()
     [False, True, True]
     """
+    _check_columns(laps, ("IsPitInLap", "IsPitOutLap"))
     return laps["IsPitInLap"].astype(bool) | laps["IsPitOutLap"].astype(bool)
 
 
@@ -202,11 +239,19 @@ def not_green_mask(laps):
     -------
     pandas.Series of bool
 
+    Raises
+    ------
+    TypeError
+        If ``laps`` is not a DataFrame.
+    ValueError
+        If the ``IsGreenLap`` column is missing.
+
     Example
     -------
     >>> not_green_mask(pd.DataFrame({"IsGreenLap": [True, False]})).tolist()
     [False, True]
     """
+    _check_columns(laps, ("IsGreenLap",))
     return ~laps["IsGreenLap"].astype(bool)
 
 
@@ -227,12 +272,18 @@ def inaccurate_mask(laps):
     pandas.Series of bool
         All False if the column is absent.
 
+    Raises
+    ------
+    TypeError
+        If ``laps`` is not a DataFrame.
+
     Example
     -------
     >>> df = pd.DataFrame({"IsAccurate": [True, False, None]})
     >>> inaccurate_mask(df).tolist()
     [False, True, False]
     """
+    _check_columns(laps, ())
     if "IsAccurate" not in laps.columns:
         return pd.Series(False, index=laps.index)
     # Element-wise comparison: True == False and NaN == False both give False,
@@ -255,6 +306,13 @@ def missing_stint_info_mask(laps):
     -------
     pandas.Series of bool
 
+    Raises
+    ------
+    TypeError
+        If ``laps`` is not a DataFrame.
+    ValueError
+        If ``Stint``, ``Compound`` or ``TyreLife`` is missing.
+
     Example
     -------
     >>> df = pd.DataFrame({"Stint": [1.0, None], "Compound": ["HARD", "HARD"],
@@ -262,6 +320,7 @@ def missing_stint_info_mask(laps):
     >>> missing_stint_info_mask(df).tolist()
     [False, True]
     """
+    _check_columns(laps, ("Stint", "Compound", "TyreLife"))
     return laps["Stint"].isna() | laps["Compound"].isna() | laps["TyreLife"].isna()
 
 

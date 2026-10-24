@@ -219,10 +219,14 @@ class PolynomialDegradationModel:
         Returns
         -------
         numpy.ndarray
+            Predicted fuel-corrected lap times [s], one per age.
 
         Raises
         ------
-        NotFittedError, ValueError
+        NotFittedError
+            Before ``fit``.
+        ValueError
+            For invalid ages or a non-positive ``base_time``.
 
         Example
         -------
@@ -267,7 +271,22 @@ class PolynomialDegradationModel:
     # Uncertainty and reporting
     # ------------------------------------------------------------------
     def parameter_names(self):
-        """Names of the degradation coefficients, e.g. ('c1 [s/lap]', 'c2 [s/lap^2]')."""
+        """Names of the degradation coefficients, e.g. ('c1 [s/lap]', 'c2 [s/lap^2]').
+
+        Returns
+        -------
+        tuple of str
+            One name (with unit) per coefficient c1 .. c_degree.
+
+        Raises
+        ------
+        Nothing: the names depend only on the degree set in the constructor.
+
+        Example
+        -------
+        >>> PolynomialDegradationModel("C3", degree=2).parameter_names()
+        ('c1 [s/lap]', 'c2 [s/lap^2]')
+        """
         names = ["c1 [s/lap]"]
         for k in range(2, self.degree + 1):
             names.append(f"c{k} [s/lap^{k}]")
@@ -291,7 +310,10 @@ class PolynomialDegradationModel:
 
         Raises
         ------
-        NotFittedError, ValueError
+        NotFittedError
+            Before ``fit``.
+        ValueError
+            For an invalid input (see Parameters).
 
         Example
         -------
@@ -323,6 +345,7 @@ class PolynomialDegradationModel:
         Raises
         ------
         NotFittedError
+            Before ``fit``.
 
         Example
         -------
@@ -351,9 +374,23 @@ class PolynomialDegradationModel:
     def summary(self):
         """Human-readable report of the fit (str).
 
+        Returns
+        -------
+        str
+            Lines with the data size, residual standard deviation, base time, each
+            coefficient with its standard errors, and the non-negative check.
+
+        Raises
+        ------
+        NotFittedError
+            Before ``fit``.
+
         Example
         -------
-        >>> print(model.summary())  # doctest: +SKIP
+        >>> ages = np.tile(np.arange(1.0, 11.0), 2)
+        >>> model = PolynomialDegradationModel("C3").fit(ages, 80.0 + 0.06 * ages + 0.01 * np.cos(ages), [0] * 10 + [1] * 10)
+        >>> print(model.summary().splitlines()[0])
+        Polynomial degradation model, compound C3, degree 1
         """
         p = self.params()
         lines = [

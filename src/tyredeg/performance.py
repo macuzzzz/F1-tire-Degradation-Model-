@@ -69,6 +69,12 @@ def machine_info():
     Returns
     -------
     dict
+        Keys platform, processor, machine, cpu_count, python, numpy, pandas,
+        scipy, sklearn (all str, except cpu_count: int).
+
+    Raises
+    ------
+    Nothing: unknown values are reported as "unknown" or None.
 
     Example
     -------
@@ -104,6 +110,12 @@ class TimingResult:
         Every recorded time per call.
     calls_per_repeat : int
         How many times the function ran inside each recorded repeat.
+
+    Example
+    -------
+    >>> result = time_function(lambda: sum(range(1000)), repeats=3, warmup=1, min_time_s=0.001)
+    >>> result.repeats, len(result.values), result.minimum <= result.mean
+    (3, 3, True)
     """
 
     mean: float
@@ -184,6 +196,18 @@ def peak_memory(func):
     Measures memory allocated DURING the call (tracemalloc starts fresh), as
     seen by tracemalloc; see the module docstring for what it cannot see.
 
+    Parameters
+    ----------
+    func : callable
+        Function with no arguments.
+
+    Returns
+    -------
+    result : object
+        What ``func()`` returned.
+    peak : int
+        Peak memory traced during the call [bytes].
+
     Raises
     ------
     TypeError
@@ -210,6 +234,12 @@ def peak_memory(func):
 # ---------------------------------------------------------------------------
 # FLOP counts of the ODE solvers (D76)
 # ---------------------------------------------------------------------------
+def _check_f_flops(f_flops):
+    """Raise unless ``f_flops`` is an integer >= 0 (bool rejected: True == 1)."""
+    if isinstance(f_flops, bool) or not isinstance(f_flops, (int, np.integer)) or f_flops < 0:
+        raise ValueError(f"f_flops must be an integer >= 0, got {f_flops!r}.")
+
+
 def euler_step_flops(f_flops):
     """FLOPs of one forward-Euler step for a scalar state.
 
@@ -218,11 +248,28 @@ def euler_step_flops(f_flops):
     t_new = t + h                1 addition                    = 1
     total = f_flops + 3
 
+    Parameters
+    ----------
+    f_flops : int
+        FLOPs of one evaluation of the right-hand side f, >= 0
+        (2 for the wear ODE, ``WEAR_RHS_FLOPS``).
+
+    Returns
+    -------
+    int
+        FLOPs of one step.
+
+    Raises
+    ------
+    ValueError
+        If ``f_flops`` is not an integer >= 0.
+
     Example
     -------
     >>> euler_step_flops(WEAR_RHS_FLOPS)
     5
     """
+    _check_f_flops(f_flops)
     return f_flops + 3
 
 
@@ -237,11 +284,28 @@ def heun_step_flops(f_flops):
     t_new = t + h                      (t + h reused)               0
     total = 2 f_flops + 7
 
+    Parameters
+    ----------
+    f_flops : int
+        FLOPs of one evaluation of the right-hand side f, >= 0
+        (2 for the wear ODE, ``WEAR_RHS_FLOPS``).
+
+    Returns
+    -------
+    int
+        FLOPs of one step.
+
+    Raises
+    ------
+    ValueError
+        If ``f_flops`` is not an integer >= 0.
+
     Example
     -------
     >>> heun_step_flops(WEAR_RHS_FLOPS)
     11
     """
+    _check_f_flops(f_flops)
     return 2 * f_flops + 7
 
 
@@ -259,11 +323,28 @@ def rk4_step_flops(f_flops):
     h / 6 * (...) and y + (...)        h / 6 (1), * (1), + (1)          = 3
     total = 4 f_flops + 3 + 6 + 5 + 3 = 4 f_flops + 17
 
+    Parameters
+    ----------
+    f_flops : int
+        FLOPs of one evaluation of the right-hand side f, >= 0
+        (2 for the wear ODE, ``WEAR_RHS_FLOPS``).
+
+    Returns
+    -------
+    int
+        FLOPs of one step.
+
+    Raises
+    ------
+    ValueError
+        If ``f_flops`` is not an integer >= 0.
+
     Example
     -------
     >>> rk4_step_flops(WEAR_RHS_FLOPS)
     25
     """
+    _check_f_flops(f_flops)
     return 4 * f_flops + 17
 
 
@@ -294,11 +375,28 @@ def rk45_attempt_flops(f_flops):
     b5 (5 non-zero): 10 + 1 = 11; error (6 non-zero): 12; norm + step: 12.
     Total 70 + 11 + 12 + 12 = 105.
 
+    Parameters
+    ----------
+    f_flops : int
+        FLOPs of one evaluation of the right-hand side f, >= 0
+        (2 for the wear ODE, ``WEAR_RHS_FLOPS``).
+
+    Returns
+    -------
+    int
+        FLOPs of one attempted step.
+
+    Raises
+    ------
+    ValueError
+        If ``f_flops`` is not an integer >= 0.
+
     Example
     -------
     >>> rk45_attempt_flops(WEAR_RHS_FLOPS)
     105
     """
+    _check_f_flops(f_flops)
     total = 0
     for stage in range(1, 7):
         total += f_flops + 2 + _combination_flops(ode_solvers.DP_A[stage, :stage]) + 1
@@ -363,6 +461,20 @@ def short_path(filename):
     its file name only. This keeps the user name and folder layout of the
     machine out of committed reports (found by a security review, C17).
 
+    Parameters
+    ----------
+    filename : str or pathlib.Path
+        Any file path, e.g. from a profiler or traceback.
+
+    Returns
+    -------
+    str
+        The shortened path, with forward slashes.
+
+    Raises
+    ------
+    Nothing: a path that cannot be resolved falls back to its file name.
+
     Example
     -------
     >>> short_path(str(_REPO_ROOT / "scripts" / "benchmark.py"))
@@ -387,8 +499,9 @@ def profile_function(func, top=25):
     Parameters
     ----------
     func : callable
+        Function with no arguments.
     top : int, optional
-        Number of functions to keep, sorted by cumulative time. Default 25.
+        Number of functions to keep, sorted by cumulative time, >= 1. Default 25.
 
     Returns
     -------
@@ -398,6 +511,13 @@ def profile_function(func, top=25):
         Columns function, ncalls, tottime_s (time inside the function itself),
         cumtime_s (including everything it called), percall_cum_s.
 
+    Raises
+    ------
+    TypeError
+        If ``func`` is not callable.
+    ValueError
+        If ``top`` is not an integer >= 1.
+
     Example
     -------
     >>> _, table = profile_function(lambda: sorted(range(10000)), top=5)
@@ -406,6 +526,8 @@ def profile_function(func, top=25):
     """
     if not callable(func):
         raise TypeError("func must be callable.")
+    if isinstance(top, bool) or not isinstance(top, (int, np.integer)) or top < 1:
+        raise ValueError(f"top must be an integer >= 1, got {top!r}.")
     profiler = cProfile.Profile()
     profiler.enable()
     try:

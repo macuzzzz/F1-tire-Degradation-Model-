@@ -265,11 +265,16 @@ are recorded in DECISIONS.md and the phase summaries.
 - Resolution: resolved. The rows now balance, e.g. 2022: 1383 loaded − 371 removed = 1012 kept. The pipeline's hash check flagged the changed file as designed (D83).
 - Impact on results / lesson learned: none on the model results; only the report format changed. Check that a summary table adds up before writing about it.
 
-## C22: Hard rule 5 (complete NumPy docstrings) is not met for 126 public objects
+## C22: Hard rule 5 (complete NumPy docstrings) was not met for 126 public objects
 - Phase / date: Phase 9 / 2026-10-25
 - What happened: the review pass (D86) found that 126 of 214 public functions, methods and classes lack at least one required section (Raises 65, Example 63, Parameters 53, Returns 48, one with no docstring). 30 functions contain no input check; 18 of them (12 functions plus the six cleaning masks) are real gaps, where bad input gives an obscure error or a silently wrong result.
 - How it was detected: `scripts/review_api.py`, written for the Phase 9 review.
 - Root cause: from Phase 3 onward, short wrapper functions and small helpers (e.g. `heun`, `rk4`, the metric functions, the FLOP counters) were documented with a one-line summary pointing to the main function, and result classes got no Example. No automatic check enforced rule 5 while the code was being written.
 - What was tried: the gaps are listed in `reports/phase9_api_review.csv` and classified in D86. They were not fixed in Phase 9, because the brief asked for a list. Filling about 230 missing sections, each Example with verified output, is a separate change that should be reviewed on its own.
-- Resolution: open. To fix: complete the docstrings and add the 18 missing checks with tests, then re-run `review_api.py` until it reports 0.
+- Resolution: **resolved (2026-10-25, D86 amendment).**
+  - Every flagged docstring was completed. Example outputs were produced by running the code and confirmed by the doctests; none was typed by hand except the `True` of one example, which the doctest checked.
+  - The 18 functions now validate their inputs, with 49 new tests in `tests/test_input_validation.py`.
+  - `review_api.py`: 213 objects, 0 incomplete docstrings. The 2 functions without checks (`is_green_track_status`, `short_path`) accept any input by design, and their docstrings say so.
+  - Full run: 935 passed, 32 skipped, coverage 95 %.
+  - Pipeline: every model, validation, strategy and sensitivity result is byte-identical; only `phase9_api_review.csv` changed.
 - Impact on results / lesson learned: none on results, since the functions are tested. A project rule that is not checked automatically drifts; the review script should have existed from Phase 1.

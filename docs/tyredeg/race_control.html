@@ -398,23 +398,30 @@ Flag       CLEAR    Track      "TRACK CLEAR"
 </span><span id="L-286"><a href="#L-286"><span class="linenos">286</span></a><span class="sd">        **or if its start time or lap time is missing**: a lap whose timing is</span>
 </span><span id="L-287"><a href="#L-287"><span class="linenos">287</span></a><span class="sd">        unknown cannot be shown to be green, so it is treated as not green.</span>
 </span><span id="L-288"><a href="#L-288"><span class="linenos">288</span></a>
-</span><span id="L-289"><a href="#L-289"><span class="linenos">289</span></a><span class="sd">    Example</span>
-</span><span id="L-290"><a href="#L-290"><span class="linenos">290</span></a><span class="sd">    -------</span>
-</span><span id="L-291"><a href="#L-291"><span class="linenos">291</span></a><span class="sd">    &gt;&gt;&gt; start = pd.Timestamp("2023-07-23 13:19:00")</span>
-</span><span id="L-292"><a href="#L-292"><span class="linenos">292</span></a><span class="sd">    &gt;&gt;&gt; window = [(pd.Timestamp("2023-07-23 13:20:00"), pd.Timestamp("2023-07-23 13:20:30"))]</span>
-</span><span id="L-293"><a href="#L-293"><span class="linenos">293</span></a><span class="sd">    &gt;&gt;&gt; is_green_lap(start, 80.0, window)   # lap ends 13:20:20, overlaps</span>
-</span><span id="L-294"><a href="#L-294"><span class="linenos">294</span></a><span class="sd">    False</span>
-</span><span id="L-295"><a href="#L-295"><span class="linenos">295</span></a><span class="sd">    &gt;&gt;&gt; is_green_lap(start, 50.0, window)   # lap ends 13:19:50, before it</span>
-</span><span id="L-296"><a href="#L-296"><span class="linenos">296</span></a><span class="sd">    True</span>
-</span><span id="L-297"><a href="#L-297"><span class="linenos">297</span></a><span class="sd">    """</span>
-</span><span id="L-298"><a href="#L-298"><span class="linenos">298</span></a>    <span class="k">if</span> <span class="n">lap_start</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">lap_start</span><span class="p">)</span> <span class="ow">or</span> <span class="n">lap_time_s</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">lap_time_s</span><span class="p">):</span>
-</span><span id="L-299"><a href="#L-299"><span class="linenos">299</span></a>        <span class="k">return</span> <span class="kc">False</span>
-</span><span id="L-300"><a href="#L-300"><span class="linenos">300</span></a>    <span class="n">lap_end</span> <span class="o">=</span> <span class="n">lap_start</span> <span class="o">+</span> <span class="n">pd</span><span class="o">.</span><span class="n">Timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="nb">float</span><span class="p">(</span><span class="n">lap_time_s</span><span class="p">))</span>
-</span><span id="L-301"><a href="#L-301"><span class="linenos">301</span></a>    <span class="k">for</span> <span class="n">window_start</span><span class="p">,</span> <span class="n">window_end</span> <span class="ow">in</span> <span class="n">intervals</span><span class="p">:</span>
-</span><span id="L-302"><a href="#L-302"><span class="linenos">302</span></a>        <span class="c1"># Two time ranges overlap if each one starts before the other ends.</span>
-</span><span id="L-303"><a href="#L-303"><span class="linenos">303</span></a>        <span class="k">if</span> <span class="n">window_start</span> <span class="o">&lt;</span> <span class="n">lap_end</span> <span class="ow">and</span> <span class="n">window_end</span> <span class="o">&gt;</span> <span class="n">lap_start</span><span class="p">:</span>
-</span><span id="L-304"><a href="#L-304"><span class="linenos">304</span></a>            <span class="k">return</span> <span class="kc">False</span>
-</span><span id="L-305"><a href="#L-305"><span class="linenos">305</span></a>    <span class="k">return</span> <span class="kc">True</span>
+</span><span id="L-289"><a href="#L-289"><span class="linenos">289</span></a><span class="sd">    Raises</span>
+</span><span id="L-290"><a href="#L-290"><span class="linenos">290</span></a><span class="sd">    ------</span>
+</span><span id="L-291"><a href="#L-291"><span class="linenos">291</span></a><span class="sd">    ValueError</span>
+</span><span id="L-292"><a href="#L-292"><span class="linenos">292</span></a><span class="sd">        If ``lap_time_s`` is negative.</span>
+</span><span id="L-293"><a href="#L-293"><span class="linenos">293</span></a>
+</span><span id="L-294"><a href="#L-294"><span class="linenos">294</span></a><span class="sd">    Example</span>
+</span><span id="L-295"><a href="#L-295"><span class="linenos">295</span></a><span class="sd">    -------</span>
+</span><span id="L-296"><a href="#L-296"><span class="linenos">296</span></a><span class="sd">    &gt;&gt;&gt; start = pd.Timestamp("2023-07-23 13:19:00")</span>
+</span><span id="L-297"><a href="#L-297"><span class="linenos">297</span></a><span class="sd">    &gt;&gt;&gt; window = [(pd.Timestamp("2023-07-23 13:20:00"), pd.Timestamp("2023-07-23 13:20:30"))]</span>
+</span><span id="L-298"><a href="#L-298"><span class="linenos">298</span></a><span class="sd">    &gt;&gt;&gt; is_green_lap(start, 80.0, window)   # lap ends 13:20:20, overlaps</span>
+</span><span id="L-299"><a href="#L-299"><span class="linenos">299</span></a><span class="sd">    False</span>
+</span><span id="L-300"><a href="#L-300"><span class="linenos">300</span></a><span class="sd">    &gt;&gt;&gt; is_green_lap(start, 50.0, window)   # lap ends 13:19:50, before it</span>
+</span><span id="L-301"><a href="#L-301"><span class="linenos">301</span></a><span class="sd">    True</span>
+</span><span id="L-302"><a href="#L-302"><span class="linenos">302</span></a><span class="sd">    """</span>
+</span><span id="L-303"><a href="#L-303"><span class="linenos">303</span></a>    <span class="k">if</span> <span class="n">lap_start</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">lap_start</span><span class="p">)</span> <span class="ow">or</span> <span class="n">lap_time_s</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">lap_time_s</span><span class="p">):</span>
+</span><span id="L-304"><a href="#L-304"><span class="linenos">304</span></a>        <span class="k">return</span> <span class="kc">False</span>
+</span><span id="L-305"><a href="#L-305"><span class="linenos">305</span></a>    <span class="k">if</span> <span class="n">lap_time_s</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+</span><span id="L-306"><a href="#L-306"><span class="linenos">306</span></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"lap_time_s must be &gt;= 0 s, got </span><span class="si">{</span><span class="n">lap_time_s</span><span class="si">}</span><span class="s2">."</span><span class="p">)</span>
+</span><span id="L-307"><a href="#L-307"><span class="linenos">307</span></a>    <span class="n">lap_end</span> <span class="o">=</span> <span class="n">lap_start</span> <span class="o">+</span> <span class="n">pd</span><span class="o">.</span><span class="n">Timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="nb">float</span><span class="p">(</span><span class="n">lap_time_s</span><span class="p">))</span>
+</span><span id="L-308"><a href="#L-308"><span class="linenos">308</span></a>    <span class="k">for</span> <span class="n">window_start</span><span class="p">,</span> <span class="n">window_end</span> <span class="ow">in</span> <span class="n">intervals</span><span class="p">:</span>
+</span><span id="L-309"><a href="#L-309"><span class="linenos">309</span></a>        <span class="c1"># Two time ranges overlap if each one starts before the other ends.</span>
+</span><span id="L-310"><a href="#L-310"><span class="linenos">310</span></a>        <span class="k">if</span> <span class="n">window_start</span> <span class="o">&lt;</span> <span class="n">lap_end</span> <span class="ow">and</span> <span class="n">window_end</span> <span class="o">&gt;</span> <span class="n">lap_start</span><span class="p">:</span>
+</span><span id="L-311"><a href="#L-311"><span class="linenos">311</span></a>            <span class="k">return</span> <span class="kc">False</span>
+</span><span id="L-312"><a href="#L-312"><span class="linenos">312</span></a>    <span class="k">return</span> <span class="kc">True</span>
 </span></pre></div>
 
 
@@ -762,23 +769,30 @@ the last message, that window ends at <code>pandas.Timestamp.max</code>.</li>
 </span><span id="is_green_lap-287"><a href="#is_green_lap-287"><span class="linenos">287</span></a><span class="sd">        **or if its start time or lap time is missing**: a lap whose timing is</span>
 </span><span id="is_green_lap-288"><a href="#is_green_lap-288"><span class="linenos">288</span></a><span class="sd">        unknown cannot be shown to be green, so it is treated as not green.</span>
 </span><span id="is_green_lap-289"><a href="#is_green_lap-289"><span class="linenos">289</span></a>
-</span><span id="is_green_lap-290"><a href="#is_green_lap-290"><span class="linenos">290</span></a><span class="sd">    Example</span>
-</span><span id="is_green_lap-291"><a href="#is_green_lap-291"><span class="linenos">291</span></a><span class="sd">    -------</span>
-</span><span id="is_green_lap-292"><a href="#is_green_lap-292"><span class="linenos">292</span></a><span class="sd">    &gt;&gt;&gt; start = pd.Timestamp("2023-07-23 13:19:00")</span>
-</span><span id="is_green_lap-293"><a href="#is_green_lap-293"><span class="linenos">293</span></a><span class="sd">    &gt;&gt;&gt; window = [(pd.Timestamp("2023-07-23 13:20:00"), pd.Timestamp("2023-07-23 13:20:30"))]</span>
-</span><span id="is_green_lap-294"><a href="#is_green_lap-294"><span class="linenos">294</span></a><span class="sd">    &gt;&gt;&gt; is_green_lap(start, 80.0, window)   # lap ends 13:20:20, overlaps</span>
-</span><span id="is_green_lap-295"><a href="#is_green_lap-295"><span class="linenos">295</span></a><span class="sd">    False</span>
-</span><span id="is_green_lap-296"><a href="#is_green_lap-296"><span class="linenos">296</span></a><span class="sd">    &gt;&gt;&gt; is_green_lap(start, 50.0, window)   # lap ends 13:19:50, before it</span>
-</span><span id="is_green_lap-297"><a href="#is_green_lap-297"><span class="linenos">297</span></a><span class="sd">    True</span>
-</span><span id="is_green_lap-298"><a href="#is_green_lap-298"><span class="linenos">298</span></a><span class="sd">    """</span>
-</span><span id="is_green_lap-299"><a href="#is_green_lap-299"><span class="linenos">299</span></a>    <span class="k">if</span> <span class="n">lap_start</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">lap_start</span><span class="p">)</span> <span class="ow">or</span> <span class="n">lap_time_s</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">lap_time_s</span><span class="p">):</span>
-</span><span id="is_green_lap-300"><a href="#is_green_lap-300"><span class="linenos">300</span></a>        <span class="k">return</span> <span class="kc">False</span>
-</span><span id="is_green_lap-301"><a href="#is_green_lap-301"><span class="linenos">301</span></a>    <span class="n">lap_end</span> <span class="o">=</span> <span class="n">lap_start</span> <span class="o">+</span> <span class="n">pd</span><span class="o">.</span><span class="n">Timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="nb">float</span><span class="p">(</span><span class="n">lap_time_s</span><span class="p">))</span>
-</span><span id="is_green_lap-302"><a href="#is_green_lap-302"><span class="linenos">302</span></a>    <span class="k">for</span> <span class="n">window_start</span><span class="p">,</span> <span class="n">window_end</span> <span class="ow">in</span> <span class="n">intervals</span><span class="p">:</span>
-</span><span id="is_green_lap-303"><a href="#is_green_lap-303"><span class="linenos">303</span></a>        <span class="c1"># Two time ranges overlap if each one starts before the other ends.</span>
-</span><span id="is_green_lap-304"><a href="#is_green_lap-304"><span class="linenos">304</span></a>        <span class="k">if</span> <span class="n">window_start</span> <span class="o">&lt;</span> <span class="n">lap_end</span> <span class="ow">and</span> <span class="n">window_end</span> <span class="o">&gt;</span> <span class="n">lap_start</span><span class="p">:</span>
-</span><span id="is_green_lap-305"><a href="#is_green_lap-305"><span class="linenos">305</span></a>            <span class="k">return</span> <span class="kc">False</span>
-</span><span id="is_green_lap-306"><a href="#is_green_lap-306"><span class="linenos">306</span></a>    <span class="k">return</span> <span class="kc">True</span>
+</span><span id="is_green_lap-290"><a href="#is_green_lap-290"><span class="linenos">290</span></a><span class="sd">    Raises</span>
+</span><span id="is_green_lap-291"><a href="#is_green_lap-291"><span class="linenos">291</span></a><span class="sd">    ------</span>
+</span><span id="is_green_lap-292"><a href="#is_green_lap-292"><span class="linenos">292</span></a><span class="sd">    ValueError</span>
+</span><span id="is_green_lap-293"><a href="#is_green_lap-293"><span class="linenos">293</span></a><span class="sd">        If ``lap_time_s`` is negative.</span>
+</span><span id="is_green_lap-294"><a href="#is_green_lap-294"><span class="linenos">294</span></a>
+</span><span id="is_green_lap-295"><a href="#is_green_lap-295"><span class="linenos">295</span></a><span class="sd">    Example</span>
+</span><span id="is_green_lap-296"><a href="#is_green_lap-296"><span class="linenos">296</span></a><span class="sd">    -------</span>
+</span><span id="is_green_lap-297"><a href="#is_green_lap-297"><span class="linenos">297</span></a><span class="sd">    &gt;&gt;&gt; start = pd.Timestamp("2023-07-23 13:19:00")</span>
+</span><span id="is_green_lap-298"><a href="#is_green_lap-298"><span class="linenos">298</span></a><span class="sd">    &gt;&gt;&gt; window = [(pd.Timestamp("2023-07-23 13:20:00"), pd.Timestamp("2023-07-23 13:20:30"))]</span>
+</span><span id="is_green_lap-299"><a href="#is_green_lap-299"><span class="linenos">299</span></a><span class="sd">    &gt;&gt;&gt; is_green_lap(start, 80.0, window)   # lap ends 13:20:20, overlaps</span>
+</span><span id="is_green_lap-300"><a href="#is_green_lap-300"><span class="linenos">300</span></a><span class="sd">    False</span>
+</span><span id="is_green_lap-301"><a href="#is_green_lap-301"><span class="linenos">301</span></a><span class="sd">    &gt;&gt;&gt; is_green_lap(start, 50.0, window)   # lap ends 13:19:50, before it</span>
+</span><span id="is_green_lap-302"><a href="#is_green_lap-302"><span class="linenos">302</span></a><span class="sd">    True</span>
+</span><span id="is_green_lap-303"><a href="#is_green_lap-303"><span class="linenos">303</span></a><span class="sd">    """</span>
+</span><span id="is_green_lap-304"><a href="#is_green_lap-304"><span class="linenos">304</span></a>    <span class="k">if</span> <span class="n">lap_start</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">lap_start</span><span class="p">)</span> <span class="ow">or</span> <span class="n">lap_time_s</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">pd</span><span class="o">.</span><span class="n">isna</span><span class="p">(</span><span class="n">lap_time_s</span><span class="p">):</span>
+</span><span id="is_green_lap-305"><a href="#is_green_lap-305"><span class="linenos">305</span></a>        <span class="k">return</span> <span class="kc">False</span>
+</span><span id="is_green_lap-306"><a href="#is_green_lap-306"><span class="linenos">306</span></a>    <span class="k">if</span> <span class="n">lap_time_s</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+</span><span id="is_green_lap-307"><a href="#is_green_lap-307"><span class="linenos">307</span></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"lap_time_s must be &gt;= 0 s, got </span><span class="si">{</span><span class="n">lap_time_s</span><span class="si">}</span><span class="s2">."</span><span class="p">)</span>
+</span><span id="is_green_lap-308"><a href="#is_green_lap-308"><span class="linenos">308</span></a>    <span class="n">lap_end</span> <span class="o">=</span> <span class="n">lap_start</span> <span class="o">+</span> <span class="n">pd</span><span class="o">.</span><span class="n">Timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="nb">float</span><span class="p">(</span><span class="n">lap_time_s</span><span class="p">))</span>
+</span><span id="is_green_lap-309"><a href="#is_green_lap-309"><span class="linenos">309</span></a>    <span class="k">for</span> <span class="n">window_start</span><span class="p">,</span> <span class="n">window_end</span> <span class="ow">in</span> <span class="n">intervals</span><span class="p">:</span>
+</span><span id="is_green_lap-310"><a href="#is_green_lap-310"><span class="linenos">310</span></a>        <span class="c1"># Two time ranges overlap if each one starts before the other ends.</span>
+</span><span id="is_green_lap-311"><a href="#is_green_lap-311"><span class="linenos">311</span></a>        <span class="k">if</span> <span class="n">window_start</span> <span class="o">&lt;</span> <span class="n">lap_end</span> <span class="ow">and</span> <span class="n">window_end</span> <span class="o">&gt;</span> <span class="n">lap_start</span><span class="p">:</span>
+</span><span id="is_green_lap-312"><a href="#is_green_lap-312"><span class="linenos">312</span></a>            <span class="k">return</span> <span class="kc">False</span>
+</span><span id="is_green_lap-313"><a href="#is_green_lap-313"><span class="linenos">313</span></a>    <span class="k">return</span> <span class="kc">True</span>
 </span></pre></div>
 
 
@@ -801,6 +815,12 @@ Output of <code><a href="#non_green_intervals">non_green_intervals()</a></code>.
 <li><strong>bool</strong>: True if the lap was fully green. False if it overlaps any window,
 <strong>or if its start time or lap time is missing</strong>: a lap whose timing is
 unknown cannot be shown to be green, so it is treated as not green.</li>
+</ul>
+
+<h6 id="raises">Raises</h6>
+
+<ul>
+<li><strong>ValueError</strong>: If <code>lap_time_s</code> is negative.</li>
 </ul>
 
 <h6 id="example">Example</h6>

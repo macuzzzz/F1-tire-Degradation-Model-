@@ -34,7 +34,13 @@ from tyredeg.config import VALID_PIRELLI_COMPOUNDS
 
 
 class NotFittedError(ValueError):
-    """A model method that needs fitted parameters was called before ``fit``."""
+    """A model method that needs fitted parameters was called before ``fit``.
+
+    Example
+    -------
+    >>> issubclass(NotFittedError, ValueError)
+    True
+    """
 
 
 @dataclass(frozen=True)
@@ -51,6 +57,12 @@ class StintData:
         Stint number of each lap, 0 .. n_stints - 1.
     stint_labels : numpy.ndarray
         Original stint identifier for each stint index.
+
+    Example
+    -------
+    >>> data = prepare_stint_data([1, 2, 3, 1, 2], [80.0, 80.1, 80.2, 81.0, 81.2], ["A", "A", "A", "B", "B"])
+    >>> data.n_laps, data.n_stints, data.stint_index.tolist()
+    (5, 2, [0, 0, 0, 1, 1])
     """
 
     tyre_age: np.ndarray
@@ -62,16 +74,69 @@ class StintData:
     def n_laps(self):
         return self.tyre_age.size
 
+    def _per_lap(self, values):
+        """Return ``values`` as a float array, after checking there is one value per lap."""
+        values = np.asarray(values, dtype=float)
+        if values.shape != (self.n_laps,):
+            raise ValueError(f"values must have shape ({self.n_laps},), one per lap; got {values.shape}.")
+        return values
+
     @property
     def n_stints(self):
         return self.stint_labels.size
 
     def demean(self, values):
-        """Subtract each stint's mean from ``values`` (the within transformation)."""
+        """Subtract each stint's mean from ``values`` (the within transformation).
+
+        Parameters
+        ----------
+        values : array_like of float, shape (n_laps,)
+            One value per lap, e.g. lap times [s] or tyre ages [laps].
+
+        Returns
+        -------
+        numpy.ndarray of float, shape (n_laps,)
+            ``values`` minus the mean of its own stint.
+
+        Raises
+        ------
+        ValueError
+            If ``values`` does not have exactly one entry per lap.
+
+        Example
+        -------
+        >>> data = prepare_stint_data([1, 2, 3, 1, 2], [80.0, 80.1, 80.2, 81.0, 81.2], ["A", "A", "A", "B", "B"])
+        >>> data.demean(data.lap_time).round(6).tolist()
+        [-0.1, -0.0, 0.1, -0.1, 0.1]
+        """
+        values = self._per_lap(values)
         return values - self.stint_means(values)[self.stint_index]
 
     def stint_means(self, values):
-        """Mean of ``values`` within each stint, shape (n_stints,)."""
+        """Mean of ``values`` within each stint, shape (n_stints,).
+
+        Parameters
+        ----------
+        values : array_like of float, shape (n_laps,)
+            One value per lap.
+
+        Returns
+        -------
+        numpy.ndarray of float, shape (n_stints,)
+            Mean of ``values`` within each stint, in stint-index order.
+
+        Raises
+        ------
+        ValueError
+            If ``values`` does not have exactly one entry per lap.
+
+        Example
+        -------
+        >>> data = prepare_stint_data([1, 2, 3, 1, 2], [80.0, 80.1, 80.2, 81.0, 81.2], ["A", "A", "A", "B", "B"])
+        >>> data.stint_means(data.lap_time).round(6).tolist()
+        [80.1, 81.1]
+        """
+        values = self._per_lap(values)
         sums = np.bincount(self.stint_index, weights=values, minlength=self.n_stints)
         counts = np.bincount(self.stint_index, minlength=self.n_stints)
         return sums / counts
@@ -112,6 +177,18 @@ def check_compound(compound):
 
 def check_tyre_age(tyre_age, name="tyre_age"):
     """Return ``tyre_age`` as a 1-D float array of finite values >= 0, else raise.
+
+    Parameters
+    ----------
+    tyre_age : array_like of float
+        Tyre ages [laps], each finite and >= 0. A scalar is treated as one age.
+    name : str, optional
+        Name used in error messages (default ``"tyre_age"``).
+
+    Returns
+    -------
+    numpy.ndarray of float, shape (n,)
+        The ages as a 1-D float array.
 
     Raises
     ------
@@ -188,7 +265,41 @@ def check_degrees_of_freedom(data, n_parameters):
 
     With one offset per stint plus ``n_parameters`` degradation parameters,
     the residual degrees of freedom are n_laps - n_stints - n_parameters.
+
+    Parameters
+    ----------
+    data : StintData
+        The training data.
+    n_parameters : int
+        Number of degradation parameters, >= 0 (e.g. 1 for a straight line).
+
+    Returns
+    -------
+    int
+        Residual degrees of freedom, n_laps - n_stints - n_parameters (>= 1).
+
+    Raises
+    ------
+    TypeError
+        If ``data`` is not a :class:`StintData`.
+    ValueError
+        If ``n_parameters`` is not an integer >= 0, or fewer than 1 residual
+        degree of freedom is left.
+
+    Example
+    -------
+    >>> data = prepare_stint_data([1, 2, 3, 1, 2], [80.0, 80.1, 80.2, 81.0, 81.2], ["A", "A", "A", "B", "B"])
+    >>> check_degrees_of_freedom(data, 1)
+    2
+    >>> check_degrees_of_freedom(data, 3)
+    Traceback (most recent call last):
+    ...
+    ValueError: Too few laps: 5 laps, 2 stints and 3 degradation parameters leave 0 residual degrees of freedom.
     """
+    if not isinstance(data, StintData):
+        raise TypeError(f"data must be a StintData, got {type(data).__name__}.")
+    if isinstance(n_parameters, bool) or not isinstance(n_parameters, (int, np.integer)) or n_parameters < 0:
+        raise ValueError(f"n_parameters must be an integer >= 0, got {n_parameters!r}.")
     dof = data.n_laps - data.n_stints - n_parameters
     if dof < 1:
         raise ValueError(
@@ -245,6 +356,12 @@ class ConstraintCheck:
     violated : bool
         True if ``min_degradation_s < -tolerance``.
     tolerance_s : float
+
+    Example
+    -------
+    >>> check = check_non_negative(lambda n: 0.05 * n - 0.1, 40.0, 0.01)
+    >>> check.min_degradation_s, check.age_of_minimum, check.violated
+    (-0.1, 0.0, True)
     """
 
     min_degradation_s: float
@@ -271,15 +388,31 @@ def check_non_negative(degradation_function, max_age, tolerance_s, ages=None):
     -------
     ConstraintCheck
 
+    Raises
+    ------
+    TypeError
+        If ``degradation_function`` is not callable.
+    ValueError
+        If ``max_age`` or ``tolerance_s`` is negative or not finite, ``ages``
+        contains invalid ages, or the function returns the wrong shape.
+
     Example
     -------
     >>> check_non_negative(lambda n: 0.07 * n, 40.0, 0.01).violated
     False
     """
+    if not callable(degradation_function):
+        raise TypeError("degradation_function must be callable, d(ages) -> degradation [s].")
+    if not np.isfinite(max_age) or max_age < 0:
+        raise ValueError(f"max_age must be a finite number of laps >= 0, got {max_age}.")
+    if not np.isfinite(tolerance_s) or tolerance_s < 0:
+        raise ValueError(f"tolerance_s must be a finite number >= 0, got {tolerance_s}.")
     if ages is None:
         ages = np.arange(0.0, max_age + 0.25, 0.5)
-    ages = np.asarray(ages, dtype=float)
+    ages = check_tyre_age(ages, "ages")
     values = np.asarray(degradation_function(ages), dtype=float)
+    if values.shape != ages.shape:
+        raise ValueError(f"degradation_function returned shape {values.shape}, expected {ages.shape}.")
     position = int(np.argmin(values))
     minimum = float(values[position])
     return ConstraintCheck(
@@ -309,6 +442,14 @@ class BootstrapResult:
         Percentile confidence interval limits.
     confidence_level : float
     seed : int
+
+    Example
+    -------
+    >>> data = prepare_stint_data([1, 2, 3, 1, 2, 3], [80.0, 80.1, 80.2, 81.0, 81.1, 81.3], ["A", "A", "A", "B", "B", "B"])
+    >>> mean_time = lambda age, time, ids: [np.mean(time)]
+    >>> result = stint_bootstrap(data, mean_time, ("mean lap time",), 50, 0.95, 42)
+    >>> result.estimates.shape, result.seed
+    ((50, 1), 42)
     """
 
     names: tuple
@@ -325,7 +466,39 @@ def resample_stints(data, rng):
 
     A stint drawn twice becomes two separate stints (new ids), so each copy
     gets its own offset, exactly as an independent stint would.
+
+    Parameters
+    ----------
+    data : StintData
+        The original training data.
+    rng : numpy.random.Generator
+        Random number generator (seeded by the caller, rule 11).
+
+    Returns
+    -------
+    tyre_age : numpy.ndarray of float
+        Tyre ages [laps] of the resampled laps.
+    lap_time : numpy.ndarray of float
+        Their lap times [s].
+    stint_id : numpy.ndarray of int
+        New stint ids 0 .. n_stints - 1, one per drawn stint.
+
+    Raises
+    ------
+    TypeError
+        If ``data`` is not a :class:`StintData` or ``rng`` is not a NumPy Generator.
+
+    Example
+    -------
+    >>> data = prepare_stint_data([1, 2, 3, 1, 2], [80.0, 80.1, 80.2, 81.0, 81.2], ["A", "A", "A", "B", "B"])
+    >>> ages, times, ids = resample_stints(data, np.random.default_rng(42))
+    >>> ids.tolist(), times.tolist()
+    ([0, 0, 0, 1, 1], [80.0, 80.1, 80.2, 81.0, 81.2])
     """
+    if not isinstance(data, StintData):
+        raise TypeError(f"data must be a StintData, got {type(data).__name__}.")
+    if not isinstance(rng, np.random.Generator):
+        raise TypeError("rng must be a numpy.random.Generator, e.g. numpy.random.default_rng(42).")
     chosen = rng.integers(0, data.n_stints, size=data.n_stints)
     ages, times, ids = [], [], []
     for new_id, stint in enumerate(chosen):
@@ -395,7 +568,40 @@ def stint_bootstrap(data, fit_parameters, names, n_resamples, confidence_level, 
 
 
 def format_parameter_table(names, values, analytic_se, bootstrap=None):
-    """Return text lines 'name  value  (analytic SE)  [bootstrap SE, CI]'."""
+    """Return text lines 'name  value  (analytic SE)  [bootstrap SE, CI]'.
+
+    Parameters
+    ----------
+    names : sequence of str
+        Parameter names.
+    values : sequence of float
+        Fitted values, same length as ``names`` (units of each parameter).
+    analytic_se : sequence of float
+        Analytic standard errors, same length.
+    bootstrap : BootstrapResult or None, optional
+        If given, its standard errors and confidence interval are appended.
+
+    Returns
+    -------
+    list of str
+        One formatted line per parameter.
+
+    Raises
+    ------
+    ValueError
+        If the lengths of ``names``, ``values``, ``analytic_se`` (and the
+        bootstrap) differ.
+
+    Example
+    -------
+    >>> format_parameter_table(["a [s/lap]"], [0.0597], [0.0021])
+    ['  a [s/lap]       0.0597   SE(analytic) 0.0021']
+    """
+    if not len(names) == len(values) == len(analytic_se):
+        raise ValueError(f"names, values and analytic_se must have the same length, got "
+                         f"{len(names)}, {len(values)} and {len(analytic_se)}.")
+    if bootstrap is not None and len(bootstrap.standard_errors) != len(names):
+        raise ValueError("bootstrap must have one standard error per parameter name.")
     lines = []
     for i, name in enumerate(names):
         line = f"  {name:<14s} {values[i]: .6g}   SE(analytic) {analytic_se[i]:.3g}"

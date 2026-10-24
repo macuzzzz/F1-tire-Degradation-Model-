@@ -180,6 +180,10 @@ def is_green_track_status(track_status):
         True only for a non-empty string made up solely of ``"1"``. A missing
         status cannot be shown to be green, so it returns False.
 
+    Raises
+    ------
+    Nothing: any value that is not a non-empty string returns False.
+
     Example
     -------
     >>> is_green_track_status("1"), is_green_track_status("12"), is_green_track_status(None)

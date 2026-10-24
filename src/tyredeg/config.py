@@ -151,11 +151,16 @@ class RaceSpec:
     year : int
         Championship season, e.g. 2023.
     event : str
-        Official FastF1 event name, e.g. ``"Bahrain Grand Prix"``.
+        Official event name, e.g. ``"Hungarian Grand Prix"``.
     role : str
         ``"train"`` (used for fitting/model selection) or ``"test"`` (held out).
     source : str
         ``"fastf1"`` or ``"openf1"`` - where the lap data is downloaded from.
+
+    Example
+    -------
+    >>> RaceSpec(2023, "Hungarian Grand Prix", "train", "openf1").role
+    'train'
     """
 
     year: int
@@ -166,7 +171,13 @@ class RaceSpec:
 
 @dataclass(frozen=True)
 class OdeSettings:
-    """Defaults for the ODE solvers (D25-D29). See ``numerics.ode`` in config.yaml."""
+    """Defaults for the ODE solvers (D25-D29). See ``numerics.ode`` in config.yaml.
+
+    Example
+    -------
+    >>> load_config("config.yaml").numerics.ode.rtol
+    0.001
+    """
 
     rtol: float
     atol: float
@@ -179,7 +190,13 @@ class OdeSettings:
 
 @dataclass(frozen=True)
 class RootFindingSettings:
-    """Defaults for the root finders (D30, D31). See ``numerics.root_finding``."""
+    """Defaults for the root finders (D30, D31). See ``numerics.root_finding``.
+
+    Example
+    -------
+    >>> load_config("config.yaml").numerics.root_finding.xtol
+    1e-10
+    """
 
     xtol: float
     ftol: float
@@ -189,7 +206,13 @@ class RootFindingSettings:
 
 @dataclass(frozen=True)
 class NumericsSettings:
-    """All Phase 3 numerical defaults (``numerics`` section of config.yaml)."""
+    """All Phase 3 numerical defaults (``numerics`` section of config.yaml).
+
+    Example
+    -------
+    >>> load_config("config.yaml").numerics.forward_step_exponent
+    0.5
+    """
 
     ode: OdeSettings
     root_finding: RootFindingSettings
@@ -202,7 +225,13 @@ class NumericsSettings:
 
 @dataclass(frozen=True)
 class VerificationSettings:
-    """Tolerances the tests use to accept a numerical method (D37)."""
+    """Tolerances the tests use to accept a numerical method (D37).
+
+    Example
+    -------
+    >>> load_config("config.yaml").verification.ode_order_tolerance
+    0.1
+    """
 
     ode_order_tolerance: float
     rk45_tolerance_factor: float
@@ -217,7 +246,13 @@ class VerificationSettings:
 
 @dataclass(frozen=True)
 class ModelSettings:
-    """Phase 4 degradation-model settings (``models`` section, D39-D46)."""
+    """Phase 4 degradation-model settings (``models`` section, D39-D46).
+
+    Example
+    -------
+    >>> load_config("config.yaml").models.candidate_degrees
+    (1, 2, 3)
+    """
 
     candidate_degrees: tuple[int, ...]
     default_degree: int
@@ -240,7 +275,13 @@ class ModelSettings:
 
 @dataclass(frozen=True)
 class ValidationSettings:
-    """Phase 5 validation settings (``validation`` section, D47-D55)."""
+    """Phase 5 validation settings (``validation`` section, D47-D55).
+
+    Example
+    -------
+    >>> load_config("config.yaml").validation.anchor_laps
+    3
+    """
 
     anchor_laps: int
     max_abs_bias_s_per_lap: float
@@ -252,7 +293,13 @@ class ValidationSettings:
 
 @dataclass(frozen=True)
 class StrategySettings:
-    """Phase 6 strategy settings (``strategy`` section, D56-D66)."""
+    """Phase 6 strategy settings (``strategy`` section, D56-D66).
+
+    Example
+    -------
+    >>> load_config("config.yaml").strategy.compounds
+    ('C3', 'C4')
+    """
 
     data_years: tuple[int, ...]
     compounds: tuple[str, ...]
@@ -266,7 +313,13 @@ class StrategySettings:
 
 @dataclass(frozen=True)
 class SensitivitySettings:
-    """Phase 7 sensitivity settings (``sensitivity`` section, D67-D73)."""
+    """Phase 7 sensitivity settings (``sensitivity`` section, D67-D73).
+
+    Example
+    -------
+    >>> load_config("config.yaml").sensitivity.relative_step
+    0.01
+    """
 
     rate_se_multiples: tuple[int, ...]
     relative_step: float
@@ -278,7 +331,13 @@ class SensitivitySettings:
 
 @dataclass(frozen=True)
 class PerformanceSettings:
-    """Phase 8 benchmark settings (``performance`` section, D74-D81)."""
+    """Phase 8 benchmark settings (``performance`` section, D74-D81).
+
+    Example
+    -------
+    >>> load_config("config.yaml").performance.repeats
+    7
+    """
 
     warmup: int
     repeats: int
@@ -296,8 +355,17 @@ class PerformanceSettings:
 class Config:
     """Validated project configuration.
 
-    See ``config.yaml`` for the meaning and units of each field. Fields that
-    are ``None`` have not been decided yet and are filled in later phases.
+    See ``config.yaml`` for the meaning and units of each field. A field that
+    is ``None`` means "not set": for example ``pit_loss_override = None``
+    means the pit loss is estimated from the data.
+
+    Example
+    -------
+    >>> config = load_config("config.yaml")
+    >>> config.random_seed, config.k_fuel
+    (42, 0.046)
+    >>> [race.year for race in config.test_races]
+    [2025]
     """
 
     random_seed: int

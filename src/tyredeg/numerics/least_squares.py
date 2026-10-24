@@ -73,6 +73,12 @@ class LeastSquaresResult:
         "normal", R for "qr".
     method : str
         ``"normal"`` or ``"qr"``.
+
+    Example
+    -------
+    >>> result = fit_linear_least_squares([[1.0, 0.0], [1.0, 1.0], [1.0, 2.0]], [1.0, 3.1, 4.9])
+    >>> result.coefficients.round(6).tolist(), round(result.residual_sum_of_squares, 6), result.method
+    ([1.05, 1.95], 0.015, 'normal')
     """
 
     coefficients: np.ndarray
@@ -167,8 +173,31 @@ def fit_linear_least_squares_qr(X, y, condition_threshold=DEFAULT_CONDITION_THRE
     Used to compare against :func:`fit_linear_least_squares`; it avoids
     forming X^T X, so it works with cond(X) rather than cond(X)^2.
 
-    Parameters, returns, raises and warnings as for
-    :func:`fit_linear_least_squares`; the condition estimate is that of R.
+    Parameters
+    ----------
+    X : array_like
+        Design matrix, shape (n, p) with n >= p, finite.
+    y : array_like
+        Observations, shape (n,), finite.
+    condition_threshold : float, optional
+        Warn (NearSingularWarning) if cond(R) exceeds this. Default 1e12.
+
+    Returns
+    -------
+    LeastSquaresResult
+        ``method == "qr"``; ``condition_estimate`` is that of R.
+
+    Raises
+    ------
+    ValueError
+        For invalid shapes or non-finite values.
+    SingularMatrixError
+        If R is singular to working precision (columns of X linearly dependent).
+
+    Warns
+    -----
+    NearSingularWarning
+        If R is ill-conditioned.
 
     Example
     -------
@@ -218,6 +247,14 @@ class PolynomialFit:
     degree : int
     result : LeastSquaresResult
         The underlying least-squares result.
+
+    Example
+    -------
+    >>> fit = fit_polynomial([0, 1, 2, 3], [1.0, 2.0, 5.0, 10.0], 2)
+    >>> fit.degree, fit.centre, fit.half_range
+    (2, 1.5, 1.5)
+    >>> (fit.unscaled_coefficients().round(10) + 0.0).tolist()   # + 0.0 turns -0.0 into 0.0
+    [1.0, 0.0, 1.0]
     """
 
     coefficients: np.ndarray
@@ -230,12 +267,29 @@ class PolynomialFit:
     def predict(self, x):
         """Evaluate the polynomial at x (original units).
 
+        Parameters
+        ----------
+        x : float or array_like
+            Point(s) in the original units of the fitted x, finite.
+
+        Returns
+        -------
+        numpy.ndarray
+            Fitted values, shape (n,).
+
+        Raises
+        ------
+        ValueError
+            If ``x`` contains NaN or infinite values.
+
         Example
         -------
         >>> fit_polynomial([0, 1, 2], [1.0, 3.0, 5.0], 1).predict([3.0]).round(10).tolist()
         [7.0]
         """
         x = np.asarray(x, dtype=float)
+        if not np.all(np.isfinite(x)):
+            raise ValueError("x must not contain NaN or infinite values.")
         return polynomial_design_matrix(x.reshape(-1), self.degree, self.centre,
                                         self.half_range) @ self.coefficients
 
@@ -244,6 +298,15 @@ class PolynomialFit:
 
         Expands ((x - c) / r)^k with the binomial theorem:
         (x - c)^k = sum_j C(k, j) x^j (-c)^(k - j).
+
+        Returns
+        -------
+        numpy.ndarray
+            Coefficients a_0 .. a_degree of 1, x, ..., x^degree.
+
+        Raises
+        ------
+        Nothing: the scaling was validated when the fit was made.
 
         Example
         -------

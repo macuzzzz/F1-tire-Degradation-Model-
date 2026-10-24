@@ -253,8 +253,35 @@ def euler(f, t_span, y0, h):
 def heun(f, t_span, y0, h):
     """Solve dy/dt = f(t, y) with Heun's method (explicit trapezoidal, order 2).
 
-    Parameters, returns and raises are as for :func:`euler`; ``nfev`` is
-    2 per step.
+    Parameters
+    ----------
+    f : callable
+        Right-hand side ``f(t, y)``; returns a float (scalar problem) or an
+        array with the same length as ``y0``.
+    t_span : tuple of float
+        ``(t0, t_end)`` with ``t_end > t0`` (e.g. tyre age in laps).
+    y0 : float or array_like
+        Initial value(s) at ``t0``, finite.
+    h : float
+        Step size, ``0 < h <= t_end - t0``. If it does not divide the
+        interval, the last step is shortened.
+
+    Returns
+    -------
+    t : numpy.ndarray
+        Time points, shape (n_points,), from ``t0`` to exactly ``t_end``.
+    y : numpy.ndarray
+        Solution, shape (n_points,) for scalar ``y0`` or (n_points, dim).
+    nfev : int
+        Number of calls to ``f`` (2 per step).
+
+    Raises
+    ------
+    TypeError
+        If ``f`` is not callable, ``t_span`` is not a pair or ``h`` not a number.
+    ValueError
+        For an empty/non-finite ``y0``, ``t_end <= t0``, an invalid ``h``, or if
+        ``f`` returns the wrong number of values or a non-finite value.
 
     Example
     -------
@@ -268,8 +295,35 @@ def heun(f, t_span, y0, h):
 def rk4(f, t_span, y0, h):
     """Solve dy/dt = f(t, y) with the classical 4th-order Runge-Kutta method.
 
-    Parameters, returns and raises are as for :func:`euler`; ``nfev`` is
-    4 per step.
+    Parameters
+    ----------
+    f : callable
+        Right-hand side ``f(t, y)``; returns a float (scalar problem) or an
+        array with the same length as ``y0``.
+    t_span : tuple of float
+        ``(t0, t_end)`` with ``t_end > t0`` (e.g. tyre age in laps).
+    y0 : float or array_like
+        Initial value(s) at ``t0``, finite.
+    h : float
+        Step size, ``0 < h <= t_end - t0``. If it does not divide the
+        interval, the last step is shortened.
+
+    Returns
+    -------
+    t : numpy.ndarray
+        Time points, shape (n_points,), from ``t0`` to exactly ``t_end``.
+    y : numpy.ndarray
+        Solution, shape (n_points,) for scalar ``y0`` or (n_points, dim).
+    nfev : int
+        Number of calls to ``f`` (4 per step).
+
+    Raises
+    ------
+    TypeError
+        If ``f`` is not callable, ``t_span`` is not a pair or ``h`` not a number.
+    ValueError
+        For an empty/non-finite ``y0``, ``t_end <= t0``, an invalid ``h``, or if
+        ``f`` returns the wrong number of values or a non-finite value.
 
     Example
     -------
@@ -293,6 +347,12 @@ class RK45Stats:
         Accepted steps.
     n_rejected : int
         Rejected (and repeated with a smaller step) steps.
+
+    Example
+    -------
+    >>> t, y, nfev, stats = rk45(lambda t, y: -y, (0.0, 5.0), 1.0, rtol=1e-6, atol=1e-9)
+    >>> stats.n_accepted, stats.n_rejected, nfev
+    (23, 0, 139)
     """
 
     n_accepted: int

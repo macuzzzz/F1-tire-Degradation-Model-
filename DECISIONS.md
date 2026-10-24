@@ -1543,6 +1543,18 @@ committed selection (11:40:30 UTC, commit 7f7d6eb) is unchanged.
     - *Internal helpers that are public by name* and are only called with validated data: `StintData.demean`, `StintData.stint_means`, `differentiation.default_step`, `OpenF1Client.cache_path`, and the four `*_flops` counters.
 - How it is validated: re-run the script after the fixes. The target is 0 incomplete docstrings and no unexplained "validates = no".
 - **Decided by AI without prior approval (Phase 9), to be reviewed by me.**
+- **Amendment (2026-10-25, my request "proceed with item 1"): the gaps were fixed.**
+  - Docstrings: all sections completed; `review_api.py` now reports 213 objects and **0 incomplete**.
+  - Input checks were added to the 18 real gaps. They raise `TypeError`/`ValueError` with clear messages; 49 tests are in `tests/test_input_validation.py`.
+  - Behaviour changes, none of which changes a result:
+    - `loading_common.is_missing` was **removed** (public but never called);
+    - `strategy.refuel` also accepts a table without `FuelCorrectedTime`;
+    - `validation.fit_on` accepts any object with a callable `fit` (the existing test uses a recording stand-in);
+    - `validation.candidate_models` now rejects an invalid compound code.
+  - Still without checks, by design: `is_green_track_status` and `performance.short_path` accept any input and return a safe value (False / a file name).
+  - Evidence:
+    - tests and doctests: 935 passed, 32 skipped, line coverage 95 %;
+    - full pipeline: every result file except `phase9_api_review.csv` byte-identical to the previous run.
 
 ## D87: Consistency review (DECISIONS.md vs config.yaml vs code)
 - Phase / date: Phase 9 / 2026-10-25

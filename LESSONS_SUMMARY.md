@@ -42,6 +42,7 @@ CHALLENGES.md was started in Phase 6.
 | 14 | Expected values in doctests were typed from mental arithmetic and were wrong (for example an RK45 FLOP count of 104 instead of 105). | Expected values are now copied from real output. | C3, C11 |
 | 15 | Timings of 20–100 µs functions were dominated by operating-system noise, and cProfile overstated the gain of the optimisation. | Each repeat is calibrated to run for at least 10 ms; the minimum time is reported; the speed-up was confirmed without the profiler (1.23×, identical results). | C12, C13, C14 |
 | 16 | The vectorised CV changed the last binary digit of some Phase 5 metrics (≤ 6.1e-16). | Results are reproducible byte for byte with the same code; across implementations they agree within a stated tolerance (1e-12 s). | C18, D80 |
+| 17 | A review script found that 126 of 214 public objects broke the project's own docstring rule, and 18 functions accepted bad input silently. No check had enforced the rule while the code was written. | All gaps were fixed, with 49 new tests; the script now reports 0 incomplete docstrings. | C22, D86 amendment |
 
 ## 2. Lessons
 
@@ -67,6 +68,8 @@ CHALLENGES.md was started in Phase 6.
    and confirm profiler gains with plain timings (#15).
 10. **Every generated file is a potential leak.** Search outputs for
     machine-specific information before committing (#13).
+11. **A rule that is not checked automatically drifts.** The docstring rule
+    held only after a script checked it (#17).
 
 ## 3. Limitations of the final result
 
@@ -84,5 +87,3 @@ CHALLENGES.md was started in Phase 6.
 - The one-stop optimum is set by the stint-limit rule. The two-stop advantage
   (4.33 s) is small compared with the uncertainty in pit loss, compound delta
   and year-to-year wear.
-- 126 of 214 public API objects still lack at least one required NumPy
-  docstring section (`reports/phase9_api_review.csv`).

@@ -117,7 +117,35 @@ class OpenF1Client:
         """Return the cache file for one request, e.g. ``cache/openf1/laps/session_key=9566.json``.
 
         The parameters are sorted so the same request always maps to the same file.
+
+        Parameters
+        ----------
+        endpoint : str
+            OpenF1 endpoint name, e.g. ``"laps"``; non-empty.
+        params : dict
+            Query parameters of the request.
+
+        Returns
+        -------
+        pathlib.Path
+            ``cache_dir / endpoint / "<key=value>_<key=value>.json"``
+            (``all.json`` without parameters).
+
+        Raises
+        ------
+        TypeError
+            If ``endpoint`` is not a non-empty string or ``params`` is not a dict.
+
+        Example
+        -------
+        >>> client = OpenF1Client("cache/openf1")
+        >>> client.cache_path("laps", {"session_key": 9566, "driver_number": 1}).as_posix()
+        'cache/openf1/laps/driver_number=1_session_key=9566.json'
         """
+        if not isinstance(endpoint, str) or endpoint.strip() == "":
+            raise TypeError("endpoint must be a non-empty string, e.g. 'laps'.")
+        if not isinstance(params, dict):
+            raise TypeError(f"params must be a dict, got {type(params).__name__}.")
         parts = [f"{key}={params[key]}" for key in sorted(params)]
         file_name = ("_".join(parts) or "all") + ".json"
         return self.cache_dir / endpoint / file_name
@@ -205,13 +233,36 @@ def race_date_utc(year, event):
     The schedule is still free (unlike F1's timing archive) and gives the same
     official event names as the FastF1 loader, so both sources agree on names.
 
+    Parameters
+    ----------
+    year : int
+        Championship season, >= 2018.
+    event : str
+        Event name, e.g. ``"Hungarian Grand Prix"``.
+
+    Returns
+    -------
+    event_name : str
+        Official event name.
+    race_start : pandas.Timestamp
+        Race start in UTC (timezone-naive).
+
     Raises
     ------
+    TypeError, ValueError
+        For an invalid ``year`` or ``event`` (see :func:`validate_year`).
     RaceNotFoundError
         If the event is unknown or FastF1 matches a different event (D7).
     RaceDataUnavailableError
         If the schedule cannot be downloaded.
+
+    Example
+    -------
+    >>> race_date_utc(2023, "Hungarian Grand Prix")  # needs the FastF1 schedule  # doctest: +SKIP
+    ('Hungarian Grand Prix', Timestamp('2023-07-23 13:00:00'))
     """
+    validate_year(year)
+    validate_event(event)
     try:
         event_info = fastf1.get_event(year, event)
     except ValueError as error:
@@ -228,11 +279,38 @@ def race_date_utc(year, event):
 def find_race_session(client, year, race_start):
     """Return the OpenF1 race session that starts on the same UTC date as ``race_start``.
 
+    Parameters
+    ----------
+    client : OpenF1Client
+        Client used to query the ``sessions`` endpoint (or any object with
+        the same ``get`` method).
+    year : int
+        Season, >= 2023 (OpenF1).
+    race_start : pandas.Timestamp
+        Race start in UTC, e.g. from :func:`race_date_utc`.
+
+    Returns
+    -------
+    dict
+        The OpenF1 session record (with ``session_key``).
+
     Raises
     ------
+    TypeError
+        If ``race_start`` is not a pandas Timestamp.
     RaceDataUnavailableError
         If OpenF1 has no (or more than one) race session on that date.
+
+    Example
+    -------
+    >>> class FakeClient:
+    ...     def get(self, endpoint, **params):
+    ...         return [{"session_key": 9140, "date_start": "2023-07-23T13:00:00+00:00"}]
+    >>> find_race_session(FakeClient(), 2023, pd.Timestamp("2023-07-23 13:00"))["session_key"]
+    9140
     """
+    if not isinstance(race_start, pd.Timestamp):
+        raise TypeError(f"race_start must be a pandas Timestamp, got {type(race_start).__name__}.")
     sessions = client.get("sessions", year=year, session_name="Race")
     matches = []
     for session in sessions:

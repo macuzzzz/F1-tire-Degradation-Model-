@@ -40,11 +40,25 @@ EPS = np.finfo(float).eps
 
 
 class SingularMatrixError(ValueError):
-    """The matrix is (numerically) singular: a pivot is effectively zero."""
+    """The matrix is (numerically) singular: a pivot is effectively zero.
+
+    Example
+    -------
+    >>> gaussian_elimination([[1.0, 2.0], [2.0, 4.0]], [1.0, 2.0])
+    Traceback (most recent call last):
+    ...
+    tyredeg.numerics.linear_solvers.SingularMatrixError: A is singular to working precision (pivot 0.000e+00 in column 1).
+    """
 
 
 class NearSingularWarning(UserWarning):
-    """The matrix is invertible but so ill-conditioned that x is unreliable."""
+    """The matrix is invertible but so ill-conditioned that x is unreliable.
+
+    Example
+    -------
+    >>> issubclass(NearSingularWarning, UserWarning)
+    True
+    """
 
 
 @dataclass(frozen=True)
@@ -57,6 +71,12 @@ class LinearSolveResult:
         Solution of A x = b (same shape as b).
     condition_estimate : float
         1-norm condition number estimate ||A||_1 * ||A^-1||_1.
+
+    Example
+    -------
+    >>> result = gaussian_elimination([[2.0, 1.0], [1.0, 3.0]], [3.0, 5.0])
+    >>> result.x.round(12).tolist(), round(result.condition_estimate, 6)
+    ([0.8, 1.4], 3.2)
     """
 
     x: np.ndarray

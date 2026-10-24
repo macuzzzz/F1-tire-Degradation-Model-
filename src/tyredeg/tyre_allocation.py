@@ -36,6 +36,16 @@ COMPOUND_PATTERN = re.compile(r"^C[0-6]$")
 def compound_number(code):
     """Return the number in a compound code, e.g. ``compound_number("C3") == 3``.
 
+    Parameters
+    ----------
+    code : str
+        Pirelli compound code, ``"C0"`` (hardest) ... ``"C6"`` (softest).
+
+    Returns
+    -------
+    int
+        0 ... 6.
+
     Raises
     ------
     ValueError
