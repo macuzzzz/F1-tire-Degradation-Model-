@@ -216,6 +216,29 @@ class VerificationSettings:
 
 
 @dataclass(frozen=True)
+class ModelSettings:
+    """Phase 4 degradation-model settings (``models`` section, D39-D46)."""
+
+    candidate_degrees: tuple[int, ...]
+    default_degree: int
+    b_bracket: tuple[float, float]
+    b_grid_points: int
+    b_xtol: float
+    b_ftol: float
+    ode_solver: str
+    rk4_step: float
+    rk45_rtol: float
+    rk45_atol: float
+    candidate_k: tuple[int, ...]
+    candidate_weights: tuple[str, ...]
+    default_k: int
+    default_weights: str
+    negative_degradation_tolerance_s: float
+    bootstrap_resamples: int
+    confidence_level: float
+
+
+@dataclass(frozen=True)
 class Config:
     """Validated project configuration.
 
@@ -242,6 +265,7 @@ class Config:
     min_stint_laps: int | None
     numerics: NumericsSettings
     verification: VerificationSettings
+    models: ModelSettings
 
     @property
     def train_races(self):
@@ -420,6 +444,90 @@ def _parse_verification(raw):
     return VerificationSettings(**values)
 
 
+VALID_ODE_SOLVERS = ("rk4", "rk45", "exact")
+VALID_KNN_WEIGHTS = ("uniform", "distance")
+
+
+def _int_list(value, name, minimum):
+    """Validate a non-empty list of distinct integers >= minimum."""
+    if not isinstance(value, list) or len(value) == 0:
+        raise TypeError(f"'{name}' must be a non-empty list of integers, got {value!r}.")
+    items = tuple(_require_int(item, f"{name} entry", minimum) for item in value)
+    if len(set(items)) != len(items):
+        raise ValueError(f"'{name}' contains duplicates: {list(items)}.")
+    return items
+
+
+def _parse_models(raw):
+    """Validate the ``models`` section (Phase 4)."""
+    models = _require_section(raw, "models")
+    poly = _require_section(models, "polynomial")
+    ode = _require_section(models, "wear_ode")
+    knn = _require_section(models, "knn")
+
+    degrees = _int_list(_require_key(poly, "candidate_degrees", "models.polynomial"),
+                        "models.polynomial.candidate_degrees", 1)
+    default_degree = _require_int(_require_key(poly, "default_degree", "models.polynomial"),
+                                  "models.polynomial.default_degree", 1)
+    if default_degree not in degrees:
+        raise ValueError("'models.polynomial.default_degree' must be one of the candidate degrees.")
+
+    bracket = _require_key(ode, "b_bracket", "models.wear_ode")
+    if not isinstance(bracket, list) or len(bracket) != 2:
+        raise TypeError("'models.wear_ode.b_bracket' must be a [low, high] list.")
+    low = _require_float(bracket[0], "models.wear_ode.b_bracket[0]")
+    high = _require_float(bracket[1], "models.wear_ode.b_bracket[1]")
+    if not low < high:
+        raise ValueError("'models.wear_ode.b_bracket' must satisfy low < high.")
+    solver = _require_string(_require_key(ode, "solver", "models.wear_ode"), "models.wear_ode.solver")
+    if solver not in VALID_ODE_SOLVERS:
+        raise ValueError(f"'models.wear_ode.solver' must be one of {VALID_ODE_SOLVERS}, got {solver!r}.")
+    b_xtol = _require_float(_require_key(ode, "b_xtol", "models.wear_ode"), "models.wear_ode.b_xtol", 0.0)
+    b_ftol = _require_float(_require_key(ode, "b_ftol", "models.wear_ode"), "models.wear_ode.b_ftol", 0.0)
+    if b_xtol == 0 and b_ftol == 0:
+        raise ValueError("'models.wear_ode': b_xtol and b_ftol cannot both be 0.")
+
+    candidate_k = _int_list(_require_key(knn, "candidate_k", "models.knn"), "models.knn.candidate_k", 1)
+    weights = _require_string_list(_require_key(knn, "candidate_weights", "models.knn"),
+                                   "models.knn.candidate_weights", VALID_KNN_WEIGHTS)
+    if weights is None:
+        raise ValueError("'models.knn.candidate_weights' must list at least one weighting.")
+    default_k = _require_int(_require_key(knn, "default_k", "models.knn"), "models.knn.default_k", 1)
+    default_weights = _require_string(_require_key(knn, "default_weights", "models.knn"),
+                                      "models.knn.default_weights")
+    if default_weights not in weights:
+        raise ValueError("'models.knn.default_weights' must be one of the candidate weightings.")
+
+    confidence = _positive_float(models, "confidence_level", "models")
+    if confidence >= 1:
+        raise ValueError(f"'models.confidence_level' must be < 1, got {confidence}.")
+
+    return ModelSettings(
+        candidate_degrees=degrees,
+        default_degree=default_degree,
+        b_bracket=(low, high),
+        b_grid_points=_require_int(_require_key(ode, "b_grid_points", "models.wear_ode"),
+                                   "models.wear_ode.b_grid_points", 3),
+        b_xtol=b_xtol,
+        b_ftol=b_ftol,
+        ode_solver=solver,
+        rk4_step=_positive_float(ode, "rk4_step", "models.wear_ode"),
+        rk45_rtol=_positive_float(ode, "rk45_rtol", "models.wear_ode"),
+        rk45_atol=_positive_float(ode, "rk45_atol", "models.wear_ode"),
+        candidate_k=candidate_k,
+        candidate_weights=weights,
+        default_k=default_k,
+        default_weights=default_weights,
+        negative_degradation_tolerance_s=_require_float(
+            _require_key(models, "negative_degradation_tolerance_s", "models"),
+            "models.negative_degradation_tolerance_s", 0.0,
+        ),
+        bootstrap_resamples=_require_int(_require_key(models, "bootstrap_resamples", "models"),
+                                         "models.bootstrap_resamples", 2),
+        confidence_level=confidence,
+    )
+
+
 def config_from_dict(raw):
     """Build a validated :class:`Config` from a plain dictionary.
 
@@ -534,6 +642,7 @@ def config_from_dict(raw):
         min_stint_laps=min_stint,
         numerics=_parse_numerics(raw),
         verification=_parse_verification(raw),
+        models=_parse_models(raw),
     )
 
 

@@ -36,6 +36,7 @@ def valid_raw_config():
         # The Phase 3 sections are copied from the real config.yaml.
         "numerics": copy.deepcopy(PROJECT_RAW["numerics"]),
         "verification": copy.deepcopy(PROJECT_RAW["verification"]),
+        "models": copy.deepcopy(PROJECT_RAW["models"]),
     }
 
 
@@ -147,6 +148,44 @@ def test_numerics_section_values():
     assert (numerics.ode.safety, numerics.ode.min_factor, numerics.ode.max_factor) == (0.9, 0.2, 10.0)
     assert numerics.condition_warning_threshold == 1e12
     assert numerics.scale_polynomial_inputs is True
+
+
+def test_models_section_values():
+    models = load_config(REPO_ROOT / "config.yaml").models
+    assert models.candidate_degrees == (1, 2, 3)
+    assert models.b_bracket == (-0.1, 0.1)
+    assert (models.b_xtol, models.b_ftol) == (1e-8, 0.0)
+    assert models.ode_solver == "rk4"
+    assert models.candidate_k == (10, 25, 50, 100, 200, 400)
+    assert models.candidate_weights == ("uniform", "distance")
+    assert (models.bootstrap_resamples, models.confidence_level) == (200, 0.95)
+
+
+@pytest.mark.parametrize(
+    "path, value, error",
+    [
+        (("models", "polynomial", "candidate_degrees"), [], TypeError),
+        (("models", "polynomial", "candidate_degrees"), [1, 1], ValueError),
+        (("models", "polynomial", "default_degree"), 4, ValueError),
+        (("models", "wear_ode", "b_bracket"), [0.1, -0.1], ValueError),
+        (("models", "wear_ode", "b_bracket"), [0.1], TypeError),
+        (("models", "wear_ode", "solver"), "euler", ValueError),
+        (("models", "wear_ode", "b_grid_points"), 2, ValueError),
+        (("models", "knn", "candidate_k"), [0, 5], ValueError),
+        (("models", "knn", "candidate_weights"), ["gaussian"], ValueError),
+        (("models", "knn", "default_weights"), "distance2", ValueError),
+        (("models", "confidence_level"), 1.0, ValueError),
+        (("models", "bootstrap_resamples"), 1, ValueError),
+    ],
+)
+def test_invalid_models_values_are_rejected(path, value, error):
+    raw = valid_raw_config()
+    target = raw
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    with pytest.raises(error):
+        config_from_dict(raw)
 
 
 def test_config_is_read_only():

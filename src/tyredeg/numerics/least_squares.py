@@ -251,12 +251,49 @@ class PolynomialFit:
         >>> fit.unscaled_coefficients().round(10).tolist()
         [1.0, 2.0]
         """
-        unscaled = np.zeros(self.degree + 1)
-        for k, beta in enumerate(self.coefficients):
-            for j in range(k + 1):
-                unscaled[j] += (beta * math.comb(k, j) * (-self.centre) ** (k - j)
-                                / self.half_range**k)
-        return unscaled
+        return unscaling_matrix(self.degree, self.centre, self.half_range) @ self.coefficients
+
+
+def unscaling_matrix(degree, centre, half_range):
+    """Matrix T with (unscaled coefficients) = T @ (scaled coefficients).
+
+    The polynomial sum_k b_k s^k with s = (x - c) / r equals sum_j a_j x^j.
+    Expanding ((x - c) / r)^k with the binomial theorem,
+    (x - c)^k = sum_j C(k, j) x^j (-c)^(k - j), gives
+    T[j, k] = C(k, j) (-c)^(k - j) / r^k for j <= k (0 otherwise).
+    Because the map is linear, a covariance matrix converts as T C T^T.
+
+    Parameters
+    ----------
+    degree : int
+        Polynomial degree >= 0.
+    centre, half_range : float
+        The scaling used (half_range > 0).
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape (degree + 1, degree + 1), upper-triangular.
+
+    Raises
+    ------
+    ValueError
+        If ``degree`` < 0 or ``half_range`` <= 0.
+
+    Example
+    -------
+    >>> unscaling_matrix(1, centre=2.0, half_range=0.5).tolist()
+    [[1.0, -4.0], [0.0, 2.0]]
+    """
+    if isinstance(degree, bool) or not isinstance(degree, (int, np.integer)) or degree < 0:
+        raise ValueError(f"degree must be an integer >= 0, got {degree!r}.")
+    if not half_range > 0:
+        raise ValueError(f"half_range must be > 0, got {half_range}.")
+    matrix = np.zeros((degree + 1, degree + 1))
+    for k in range(degree + 1):
+        for j in range(k + 1):
+            matrix[j, k] = math.comb(k, j) * (-centre) ** (k - j) / half_range**k
+    return matrix
 
 
 def polynomial_design_matrix(x, degree, centre=0.0, half_range=1.0):

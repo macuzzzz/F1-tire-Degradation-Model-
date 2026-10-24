@@ -48,3 +48,20 @@ def test_linear_and_least_squares_defaults_match_config():
     assert defaults_of(linear_solvers.gaussian_elimination)["condition_threshold"] == threshold
     assert defaults_of(least_squares.fit_linear_least_squares)["condition_threshold"] == threshold
     assert defaults_of(least_squares.fit_polynomial)["scale"] == NUMERICS.scale_polynomial_inputs
+
+
+def test_model_defaults_match_config():
+    # Phase 4 model defaults must equal the `models` section of config.yaml (D46).
+    from tyredeg.models import knn, polynomial, wear_ode
+
+    models = load_config(Path(__file__).resolve().parents[1] / "config.yaml").models
+    assert polynomial.DEFAULT_DEGREE == models.default_degree
+    assert wear_ode.DEFAULT_SOLVER == models.ode_solver
+    assert wear_ode.DEFAULT_B_BRACKET == models.b_bracket
+    assert wear_ode.DEFAULT_B_GRID_POINTS == models.b_grid_points
+    assert (wear_ode.DEFAULT_B_XTOL, wear_ode.DEFAULT_B_FTOL) == (models.b_xtol, models.b_ftol)
+    assert wear_ode.DEFAULT_RK4_STEP == models.rk4_step
+    assert (wear_ode.DEFAULT_RK45_RTOL, wear_ode.DEFAULT_RK45_ATOL) == (models.rk45_rtol, models.rk45_atol)
+    assert (knn.DEFAULT_K, knn.DEFAULT_WEIGHTS) == (models.default_k, models.default_weights)
+    for module in (polynomial, wear_ode, knn):
+        assert module.DEFAULT_NEGATIVE_TOLERANCE_S == models.negative_degradation_tolerance_s

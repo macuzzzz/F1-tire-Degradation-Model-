@@ -620,6 +620,141 @@ Evidence comes from `scripts/numerics_study.py`. It writes tables to `reports/ph
 
 ---
 
+# Phase 4: degradation models
+
+All evidence uses the **training races only**: Hungary 2022–2024, 1,991 clean C3 laps in 87 stints, fuel-corrected, tyre ages 2–41 laps.
+
+## D39: Base pace — a separate offset per stint, degradation shared per compound
+- Phase / date: Phase 4 / 2026-10-24
+- Options considered: (a) pool everything (one base time per compound); (b) a separate base-time offset per stint, with the degradation parameters shared per compound; (c) one offset per race.
+- Decision: **(b)**. `lap_time = offset_of_its_stint + d(tyre_age)`, with d(0) = 0.
+  - Fitted with the within-stint transformation (Frisch–Waugh–Lovell): subtract each stint's mean, fit without an intercept, then recover the offsets as stint means. Residual degrees of freedom = n − stints − parameters.
+  - Interface: `fit(tyre_age, lap_time, stint_id=None)`; `predict(tyre_age, base_time=None)` defaults to the median offset.
+  - The lap time is `FuelCorrectedTime` and the tyre age is `TyreLife`.
+- Justification: Separates car pace from tyre wear without modelling car performance (D6 amendment).
+
+  | | Pooled (a) | Per-stint offsets (b) |
+  |---|---|---|
+  | Slope | 0.0730 s/lap | 0.0705 s/lap |
+  | Residual std | 0.717 s | **0.450 s** |
+
+  The offsets spread with a std of 0.59 s (83.8–86.3 s).
+- Source / evidence: the exploratory run above; the FWL theorem (e.g. Greene, *Econometric Analysis*, partitioned regression — **to verify**).
+- How it is validated: `test_polynomial_matches_full_dummy_variable_regression` (identical coefficients and standard errors to an explicit one-column-per-stint regression with numpy `lstsq`, for degrees 1–3).
+- Proposed by AI, approved by me.
+
+## D40: Candidate polynomial degrees
+- Phase / date: Phase 4 / 2026-10-24
+- Options considered: {1, 2}; {1, 2, 3}; {1 … 5}.
+- Decision: **{1, 2, 3}**, default 1. Phase 5 cross-validation chooses. The polynomial has no constant term (the offsets carry it), and the inputs are scaled (D35).
+- Justification: BIC (exploratory) is lowest for degree 1: −2601.6, against −2594.1 for degree 2 and −2590.3 for degree 3. Degrees 4–5 add nothing.
+- Source / evidence: real-data fits.
+
+  | Degree | Coefficients (± bootstrap SE) | 95% CI | Note |
+  |---|---|---|---|
+  | 1 | c1 = 0.0705 ± 0.0031 s/lap | 0.065–0.077 | |
+  | 2 | c2 = 3.4e-5 ± 2.7e-4 | includes 0 | no curvature detected |
+  | 3 | all three coefficients | all include 0 | |
+
+- How it is validated: `test_polynomial_recovers_linear_rate`, `test_polynomial_recovers_quadratic`.
+- Proposed by AI, approved by me.
+
+## D41: Wear ODE — bracket for b, the b → 0 limit, and the search
+- Phase / date: Phase 4 / 2026-10-24
+- Options considered: bracket [0, 0.1], [−0.1, 0.1] or [−0.2, 0.2]; search method; root-finding tolerances.
+- Decision:
+  - **Unit response:** d = a·g_b, where dg/dn = 1 + b·g, g(0) = 0. For fixed b, a comes from my linear least squares (FWL).
+  - **Bracket:** b ∈ **[−0.1, 0.1]**.
+  - **Search:** a 21-point grid scan of RSS(b), then **bisection** on dRSS/db (my central difference) between the grid neighbours of the lowest point. Secant and Newton (second difference) are selectable.
+  - **Tolerances for this search: `xtol = 1e-8`, `ftol = 0`.**
+  - **Boundary:** an optimum at a bracket end is flagged.
+  - **Exact solution:** g_b = `expm1(b·n)/b`, and exactly n at b = 0.
+- Justification:
+  - The best b is about 0, so a bracket starting at 0 would put the optimum on its edge.
+  - |b| = 0.1 means a 60× rate change over 41 laps, which is generous.
+  - dRSS/db has round-off noise of about 1e-8, so the residual test cannot reach 1e-12.
+  - `expm1` avoids cancellation for tiny b·n.
+- Source / evidence (real data):
+
+  | Item | Result |
+  |---|---|
+  | Fit | **a = 0.06932 s/lap** (bootstrap SE 0.0102), **b = +0.00101 /lap** (bootstrap SE 0.0083; 95% CI −0.015 to +0.017, so no detectable cliff) |
+  | Bisection | 21 iterations |
+  | RK4, RK45, exact × bisection, secant, Newton | identical a and b (bisection 21, secant 5, Newton 3 iterations) |
+  | **Benchmark** `scipy.optimize.least_squares` on the full 89-parameter problem | a = 0.069319, b = +0.001013, RSS 385.2655 — identical |
+
+  The per-race best b values are −0.009, +0.010 and +0.002, all inside the bracket.
+- How it is validated: `test_wear_ode_recovers_parameters` (b = 0.03, 0 and −0.03), `test_wear_ode_matches_scipy_least_squares_benchmark`, `test_wear_ode_solvers_and_root_finders_agree` (9 combinations), `test_wear_ode_flags_bracket_boundary`, `test_exact_solution_b_to_zero_limit` (Taylor series to 1e-12).
+- Proposed by AI, approved by me.
+
+## D42: ODE solver inside the fit
+- Phase / date: Phase 4 / 2026-10-24
+- Options considered: (a) RK4, h = 1 lap; (b) RK45, integrated segment by segment between consecutive tyre ages; (c) the exact solution.
+- Decision: **(a) RK4, 1-lap steps (default)**. RK45 (rtol 1e-10, atol 1e-12) and the exact solution are selectable. The exact solution is used to verify the numerical one on every fit (`ode_check_max_error`).
+- Justification: RK4 is smooth in b, so RSS(b) can be differentiated reliably. An adaptive solver changes its steps with b, so it needs tight tolerances.
+- Source / evidence: on real data, the RK4 vs exact error is **2.7e-14 s**; RK45 gives the same b as RK4 to all printed digits.
+- How it is validated: `test_rk4_unit_response_matches_exact` (b from −0.1 to 0.1, ages 0–55), `test_rk45_unit_response_matches_exact`.
+- Proposed by AI, approved by me.
+
+## D43: Non-negative degradation
+- Phase / date: Phase 4 / 2026-10-24
+- Options considered: (a) enforce a ≥ 0 for the ODE and only check and report for the polynomial and KNN; (b) report only, for every model; (c) reparametrise a = eᶿ.
+- Decision: **(a)**.
+  - **ODE:** for n > 0, g_b(n) > 0 for every b, so d ≥ 0 exactly when a ≥ 0. If least squares gives a < 0 for some b, the constrained optimum for that b is a = 0 (exact for a one-variable quadratic). It is flagged, and the analytic SEs become NaN.
+  - **Polynomial and KNN:** d is checked on ages 0 … max; it is flagged if min d < −**0.01 s**.
+- Justification: Forcing a shape onto the polynomial and KNN would hide what the data says.
+- Source / evidence: real data: no violations. a = 0.069 > 0; min d = 0 for the polynomials; min d = 0.019 s for KNN.
+- How it is validated: `test_wear_ode_clamps_negative_wear_rate`, `test_polynomial_flags_negative_degradation`, `test_knn_model_flags_negative_degradation`.
+- Proposed by AI, approved by me.
+
+## D44: KNN
+- Phase / date: Phase 4 / 2026-10-24
+- Options considered:
+  - Base pace: (a) offsets from the linear per-stint model; (b) backfitting; (c) stint means.
+  - Ties: (a) include every point tied with the k-th distance; (b) exactly k, broken by row order.
+- Decision:
+  - **Feature:** tyre age only, with no scaling (one feature).
+  - **Base pace (a):** subtract the offsets from the linear per-stint model before KNN.
+  - **Search:** brute-force Euclidean distances.
+  - **Ties (a):** include all points tied with the k-th distance, so results don't depend on row order.
+  - **Candidates:** k ∈ {10, 25, 50, 100, 200, 400}; weights uniform (default, k = 50) or inverse-distance (exact matches take all the weight, sklearn's rule).
+  - KNN does not extrapolate beyond the oldest training age (41 laps).
+- Justification: Degradation is nearly linear (D40, D41), so the linear offsets are accurate. One feature means scaling cannot change which neighbours are nearest.
+- Source / evidence:
+  - Identical to `sklearn.neighbors.KNeighborsRegressor` (to 1e-12) on tie-free data.
+  - Real-data finding: **with whole-lap tyre ages, inverse-distance weighting uses only the laps at exactly the query age, whatever k is.** All six distance-weighted candidates give the same curve (d(5, 20, 35) = 0.35, 1.33, 2.48 s).
+  - Large uniform k flattens the oldest ages: d(35) = 2.53 s at k = 10 but 1.94 s at k = 400.
+  - Both effects are for Phase 5 cross-validation to judge.
+- How it is validated: `test_knn_matches_sklearn_on_tie_free_data` (k = 1, 5, 15 × both weightings), `test_knn_includes_all_tied_neighbours`, `test_knn_distance_weighting_with_exact_match`, `test_knn_model_recovers_degradation_curve`.
+- Proposed by AI, approved by me.
+
+## D45: Parameter uncertainty
+- Phase / date: Phase 4 / 2026-10-24
+- Options considered: (a) analytic standard errors from the residuals; (b) a bootstrap resampling individual laps; (c) a bootstrap resampling whole stints.
+- Decision: report **both** (a) and (c).
+  - **(a) Analytic:** σ²(XᵀX)⁻¹ with stint-corrected degrees of freedom; for the ODE, Gauss–Newton with the b-derivative by central difference.
+  - **(c) Stint bootstrap:** B = 200 resamples, seed 42, 95% percentile CI. A stint drawn twice counts as two stints.
+  - **The bootstrap is the main uncertainty for Phase 7.**
+- Justification: The lag-1 within-stint residual correlation is a median of 0.45 (IQR 0.24–0.64), so the analytic SEs, which assume independent laps, are too small.
+- Source / evidence: real data, **bootstrap SE ÷ analytic SE = 2.4 (c1), 2.2 (ODE a), 2.2 (ODE b)**, larger than the 1.6 I estimated in the proposal. Bootstrap run times: 0.2 s (polynomial) and 16 s (ODE) for B = 200.
+- How it is validated: `test_bootstrap_agrees_with_analytic_se_for_independent_noise` (ratio 0.7–1.4), `test_bootstrap_exceeds_analytic_se_for_correlated_noise` (AR(1) ρ = 0.6: ratio > 1.2), `test_bootstrap_is_reproducible_with_a_seed`.
+- Proposed by AI, approved by me.
+
+## D46: Model interface, compound check, defaults
+- Phase / date: Phase 4 / 2026-10-24
+- Options considered: n/a (interface).
+- Decision:
+  - **Constructor:** each model takes a Pirelli compound code (checked against C0–C6; "HARD" is rejected).
+  - **Methods:** `fit`, `predict`, `degradation`, `params()` (dict), `summary()` (text) and, for the polynomial and ODE, `bootstrap()`.
+  - **Defaults:** the `models:` section of config.yaml, mirrored in the code and checked by a test (as D38).
+  - **Not fitted:** using a model before `fit` raises `NotFittedError`, a `ValueError`.
+- Justification: One interface for Phase 5; `stint_id` added for D39.
+- Source / evidence: n/a.
+- How it is validated: the shared tests in `tests/test_models.py` (empty or mismatched inputs, NaN, negative age, unknown compound, use before fit); `test_model_defaults_match_config`.
+- Proposed by AI, approved by me.
+
+---
+
 # Open issues (need my decision)
 
 ## OI-1: F1 timing data now requires an F1 TV login (resolved by D14: free sources)

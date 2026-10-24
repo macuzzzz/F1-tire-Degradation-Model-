@@ -158,3 +158,42 @@ verification:
   least_squares_rtol: 1.0e-8
   # Recovered coefficients must lie within this many standard errors of the truth.
   least_squares_se_multiple: 3.0
+
+# =============================================================================
+# Phase 4: degradation models (fitted per Pirelli compound). (D39-D46)
+# Lap time = fuel-corrected time; tyre age = TyreLife [laps].
+# =============================================================================
+models:
+  polynomial:
+    # Candidate degrees; Phase 5 cross-validation picks the final one. (D40)
+    candidate_degrees: [1, 2, 3]
+    default_degree: 1
+
+  wear_ode:
+    # dd/dn = a + b d, d(0) = 0. Search bracket for b [1/lap]. (D41)
+    b_bracket: [-0.1, 0.1]
+    # RSS(b) is evaluated on this many grid points before bisection. (D41)
+    b_grid_points: 21
+    # Root-finding tolerances for dRSS/db = 0: dRSS/db is a central
+    # difference with round-off noise ~1e-8, so the residual test is off. (D41)
+    b_xtol: 1.0e-8
+    b_ftol: 0.0
+    # ODE solver for the unit response g_b: rk4 (default), rk45 or exact. (D42)
+    solver: rk4
+    rk4_step: 1.0          # [laps]
+    rk45_rtol: 1.0e-10     # tight, so RSS(b) stays smooth for the derivative
+    rk45_atol: 1.0e-12
+
+  knn:
+    # Candidate k values and weightings; Phase 5 cross-validation picks. (D44)
+    candidate_k: [10, 25, 50, 100, 200, 400]
+    candidate_weights: [uniform, distance]
+    default_k: 50
+    default_weights: uniform
+
+  # Degradation below -tolerance anywhere on 0..max tyre age is flagged. (D43)
+  negative_degradation_tolerance_s: 0.01
+
+  # Stint (cluster) bootstrap for parameter uncertainty. (D45)
+  bootstrap_resamples: 200
+  confidence_level: 0.95
