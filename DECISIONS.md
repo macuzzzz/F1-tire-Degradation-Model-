@@ -884,9 +884,117 @@ All numbers below come from `reports/phase5_cv_summary.csv` and the other `repor
 - How it is validated: `test_test_stage_refuses_without_selection`, `test_selection_round_trip`, `test_test_run_happens_once_unless_forced`.
 - Proposed by AI, approved by me.
 
+## Phase 5 final test result (2025 Hungarian GP, evaluated once)
+- **Sequence:**
+  1. Phase 5 code committed (`7f7d6eb`).
+  2. CV stage rerun on that commit; the selection written.
+  3. `reports/model_selection.json` committed (`a64967b`).
+  4. **Then** `--stage test` run once (2026-10-24T11:40:44Z, logged in `reports/test_runs.log`).
+
+  Git history therefore shows the selection was fixed before the test.
+- **Result** (`reports/phase5_test_results.csv`, anchored on the first 3 laps of each stint):
+
+  | Compound | Model | Test RMSE | Test bias | Baseline RMSE | CV RMSE |
+  |---|---|---|---|---|---|
+  | C3 | **polynomial degree 1 (selected)** | **0.942 s** | **+0.276 s/lap** | 1.311 s | 0.633 s |
+  | C3 | wear ODE | 0.942 s | +0.273 | | |
+  | C3 | KNN k = 100 uniform | 0.919 s | +0.201 | | |
+  | C4 | **polynomial degree 1 (selected)** | **1.042 s** | **+0.536 s/lap** | 1.082 s | 0.851 s |
+  | C4 | KNN k = 100 uniform | 0.962 s | +0.400 | | |
+
+- **Assessment against D51:**
+  - Both selected models still beat the baseline (C4 only narrowly).
+  - **Both fail the bias criterion (≤ 0.10 s/lap) on the test race:** they predict more degradation than occurred.
+- **Post-test diagnostic** (descriptive only, NOT used to change any selection). Linear degradation rate per year, with 95% stint-bootstrap CI:
+
+  | Compound | 2022 | 2023 | 2024 | 2025 |
+  |---|---|---|---|---|
+  | C3 | 0.072 (as MEDIUM) | 0.063 | 0.075 | **0.045 [0.033, 0.059]** |
+  | C4 | **0.134 (as SOFT)** | 0.058 | 0.065 | **0.050 [0.037, 0.065]** |
+
+  - 2025 wear was lower than in every training year.
+  - The 2025 C3 stints reached a tyre age of **55** laps (the training maximum was 41), so part of the test is extrapolation.
+- See OI-7 for what this means for Phase 6.
+
+## Track temperature (reviewed after the test; not modelled)
+- Phase / date: Phase 5 / 2026-10-24
+- Options considered: (a) add track temperature to the model; (b) report it as a likely contributor and cover it through the year-to-year spread in the Phase 7 sensitivity analysis; (c) also record per-lap weather (changing D8) for plots and future work.
+- Decision: **(b). Track temperature is not a model input.** Option (c) is left open: D8 still skips weather data.
+- Justification:
+  1. Track temperature is essentially one value per race: 4 data points, only 3 in training. That is far too few to estimate an effect.
+  2. Between races it is confounded with car development, Pirelli's compound revisions, 2022's rain and the different tyre roles.
+  3. Within a race it drifts roughly with lap number, which is already tied to tyre age and fuel load, so it cannot be separated from them.
+- Source / evidence: race weather (FastF1 mirror for 2022, OpenF1 `weather` for 2023–2025), read-only check on 2026-10-24:
+
+  | Race | Track temperature mean (min–max) | Air temperature | Rain recorded | C3 wear rate [s/lap] |
+  |---|---|---|---|---|
+  | 2022 | 26.7 °C (22.8–29.3) | 18.6 °C | yes | 0.072 |
+  | 2023 | 48.6 °C (45.5–51.4) | 28.8 °C | no | 0.063 |
+  | 2024 | 44.9 °C (40.4–49.7) | 28.8 °C | no | 0.075 |
+  | 2025 (test) | 32.0 °C (30.6–36.5) | 22.0 °C | no | 0.045 |
+
+  There is no clean temperature trend: 2022 was the coolest race but had high wear, and 2023 was the hottest but had the lowest training-year wear. Cool conditions alone do not explain 2025's low wear.
+- How it is validated: n/a. Reported in the discussion and limitations; covered by the Phase 7 rate range (OI-7 (d)).
+- Proposed by AI, approved by me.
+
+## Factors affecting tyre wear: review of what the model covers
+- Phase / date: Phase 5 / 2026-10-24
+- Options considered: add more factors to the model vs keep it and document them.
+- Decision: **keep the model as it is; document all factors in the report's limitations.**
+- Justification: With four races, every extra factor would be estimated from too little data (as for temperature).
+- Source / evidence: review of the pipeline.
+
+  **Handled directly or indirectly:**
+
+  | Factor | How |
+  |---|---|
+  | Tyre age | Modelled (`TyreLife`) |
+  | Compound | Pirelli C-number, fitted per compound |
+  | Fuel load **plus track evolution** | Fuel correction (D21–D22; see the restatement below) |
+  | Car, driver and race pace | Per-stint offsets (D39) |
+  | Pit laps, safety cars, yellow flags, first lap | Cleaning (D17–D18) |
+  | Isolated slow laps | Outlier rule (D19) |
+  | Earlier use of the set | Partly: `TyreLife` counts earlier laps, but not how hard they were run |
+
+  **Not measurable from timing data (limitations):**
+  - **Driver tyre management:** drivers on long stints save their tyres, which makes long stints look like they degrade less. This probably contributes to OI-6 (C4 levelling off) and to the 55-lap stints in 2025.
+  - Tyre pressure and camber limits set by Pirelli per event.
+  - Car setup and how tyre-friendly a car is.
+  - The wear mechanism (graining, blistering, overheating), which the linear model averages over.
+  - Track surface. **Not verified:** whether the Hungaroring was resurfaced between 2022 and 2025.
+
+  **Checkable with our data, not run (see OI-8):**
+  - wear rate by team;
+  - dirty air (following within about 1–2 s);
+  - a damp track in 2022;
+  - track evolution, which is part of the fuel coefficient (below).
+- How it is validated: n/a (documentation).
+- Proposed by AI, approved by me.
+
+## D22 restatement: the fuel coefficient also contains track evolution
+As the track rubbers in, lap times fall lap by lap, exactly like burning fuel:
+both effects grow linearly with lap number. The coefficient estimated from the
+data, k_fuel = 0.046 s/lap (D22), is therefore **fuel load plus track
+evolution combined**. The correction removes both, so no result changes, but
+the report should describe it that way. The leftover-fuel diagnostic (D54) is
+consistent with this: +0.0008 s/lap, CI includes 0.
+
 ---
 
 # Open issues (need my decision)
+
+## OI-7: Degradation changes from year to year (found by the final test)
+The test race degraded less than every training race (above). Also, the same
+compound behaves differently depending on its label/role: C4 used as the
+SOFT (2022) wore about twice as fast as C4 used as the MEDIUM (2023–2024),
+which inflates the pooled C4 rate. This challenges the D52 assumption that
+the Pirelli C-number alone determines wear. Options to decide in Phase 6:
+(a) use the frozen, validated models as they are (the test error then
+describes their real accuracy); (b) refit the selected model forms on all
+four races for the strategy (standard practice after the final test; the
+test result remains the honest accuracy estimate); (c) use only races where
+the compound had the same label (e.g. C4 as MEDIUM: 2023–2025); (d) carry
+the year-to-year spread of the rate into the Phase 7 sensitivity analysis.
 
 ## OI-6: The linear C4 model over-predicts degradation on old tyres (Phase 5 residuals)
 CV residuals of the selected C4 model (polynomial degree 1) are about +0.6 to
@@ -933,3 +1041,12 @@ empirical optimum is 0.1–0.3 × the default, so the scaling makes h too large
 there (errors still ≤ 7e-8). For the planned uses |x| < 1 (the wear-rate
 parameter b), so no change is needed now. Phase 6 differentiates race time
 with respect to the pit lap (|x| ≈ 20–50), where this should be re-checked.
+
+## OI-8: Optional wear-factor diagnostics (not run; reported only if run)
+Proposed cheap checks that would not change any model:
+(1) degradation rate per team, to show how much assuming one shared rate per
+compound (D39) hides; (2) whether 2022 laps on dry tyres ran on a damp track
+(match the recorded rain times against lap times). A dirty-air
+(traffic) analysis is possible with OpenF1 gaps for 2023+ and FastF1 timing
+for 2022, but defining "in traffic" would need new decisions, so it is not
+proposed unless brought into scope.
