@@ -277,6 +277,22 @@ class SensitivitySettings:
 
 
 @dataclass(frozen=True)
+class PerformanceSettings:
+    """Phase 8 benchmark settings (``performance`` section, D74-D81)."""
+
+    warmup: int
+    repeats: int
+    min_time_per_repeat_s: float
+    ode_step_counts: tuple[int, ...]
+    rk45_rtols: tuple[float, ...]
+    knn_train_sizes: tuple[int, ...]
+    knn_queries: int
+    knn_k: int
+    lsq_degrees: tuple[int, ...]
+    profile_top: int
+
+
+@dataclass(frozen=True)
 class Config:
     """Validated project configuration.
 
@@ -307,6 +323,7 @@ class Config:
     validation: ValidationSettings
     strategy: StrategySettings
     sensitivity: SensitivitySettings
+    performance: PerformanceSettings
 
     @property
     def train_races(self):
@@ -655,6 +672,33 @@ def _parse_sensitivity(raw):
     )
 
 
+def _parse_performance(raw):
+    """Validate the ``performance`` section (Phase 8)."""
+    section = _require_section(raw, "performance")
+    name = "performance"
+    rtols = _require_key(section, "rk45_rtols", name)
+    if not isinstance(rtols, list) or not rtols:
+        raise TypeError(f"'{name}.rk45_rtols' must be a non-empty list.")
+    rtols = tuple(_require_float(v, f"{name}.rk45_rtols entry", strictly_positive=True) for v in rtols)
+    sizes = _int_list(_require_key(section, "knn_train_sizes", name), f"{name}.knn_train_sizes", 1)
+    k = _require_int(_require_key(section, "knn_k", name), f"{name}.knn_k", 1)
+    if k > min(sizes):
+        raise ValueError(f"'{name}.knn_k' ({k}) must not exceed the smallest training size.")
+    return PerformanceSettings(
+        warmup=_require_int(_require_key(section, "warmup", name), f"{name}.warmup", 0),
+        repeats=_require_int(_require_key(section, "repeats", name), f"{name}.repeats", 1),
+        min_time_per_repeat_s=_positive_float(section, "min_time_per_repeat_s", name),
+        ode_step_counts=_int_list(_require_key(section, "ode_step_counts", name),
+                                  f"{name}.ode_step_counts", 1),
+        rk45_rtols=rtols,
+        knn_train_sizes=sizes,
+        knn_queries=_require_int(_require_key(section, "knn_queries", name), f"{name}.knn_queries", 1),
+        knn_k=k,
+        lsq_degrees=_int_list(_require_key(section, "lsq_degrees", name), f"{name}.lsq_degrees", 1),
+        profile_top=_require_int(_require_key(section, "profile_top", name), f"{name}.profile_top", 1),
+    )
+
+
 def config_from_dict(raw):
     """Build a validated :class:`Config` from a plain dictionary.
 
@@ -773,6 +817,7 @@ def config_from_dict(raw):
         validation=_parse_validation(raw),
         strategy=_parse_strategy(raw, races),
         sensitivity=_parse_sensitivity(raw),
+        performance=_parse_performance(raw),
     )
 
 

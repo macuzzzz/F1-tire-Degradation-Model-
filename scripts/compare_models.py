@@ -51,6 +51,7 @@ from tyredeg.validation import (  # noqa: E402
     compute_metrics,
     cross_validate,
     fit_on,
+    guard_cv_rerun,
     guard_test_run,
     leave_one_race_out,
     leftover_fuel_effect,
@@ -93,7 +94,10 @@ def physical_checks(spec, laps, config):
             "drops_over_tolerance": mono.n_drops_over_tolerance, "monotonic_ok": mono.ok}, model
 
 
-def run_cv(config):
+def run_cv(config, force=False):
+    # After the test stage has run, the frozen selection must not be overwritten (C16).
+    guard_cv_rerun(REPO_ROOT / config.validation.selection_file,
+                   REPO_ROOT / config.validation.test_results_file, force)
     races = config.train_races
     assert all(race.role == "train" for race in races)
     print(f"Cross-validation on TRAINING races only: {[r.year for r in races]} (test race not loaded)")
@@ -276,13 +280,14 @@ def run_test(config, force):
 def main():
     parser = argparse.ArgumentParser(description="Phase 5 model comparison (two stages).")
     parser.add_argument("--stage", choices=("cv", "test"), required=True)
-    parser.add_argument("--force", action="store_true", help="allow a repeated test run (logged)")
+    parser.add_argument("--force", action="store_true",
+                        help="allow a repeated test run (logged), or a CV re-run after the test")
     parser.add_argument("--config", default=str(REPO_ROOT / "config.yaml"))
     args = parser.parse_args()
     logging.getLogger("fastf1").setLevel(logging.ERROR)
     config = load_config(args.config)
     if args.stage == "cv":
-        run_cv(config)
+        run_cv(config, args.force)
     else:
         run_test(config, args.force)
 

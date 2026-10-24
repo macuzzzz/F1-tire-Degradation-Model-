@@ -126,3 +126,92 @@ are recorded in DECISIONS.md and the phase summaries.
   2. A proper edit using string concatenation with "\n".
 - Resolution: resolved by attempt 2; figures regenerated (the numbers are unchanged, since the run is deterministic).
 - Impact on results / lesson learned: none on results. Look at the figures, and do not edit code with shell substitutions that interpret escape sequences.
+
+## C11: My hand count of the RK45 FLOPs was off by one
+- Phase / date: Phase 8 / 2026-10-24
+- What happened: the docstring example of `rk45_attempt_flops` expected 104 FLOPs per attempted Dormand-Prince step, but the function returned 105.
+- How it was detected: doctest failure.
+- Root cause: my mental count, not the code. Recounting from the Butcher tableau gives 105:
+
+  | Item | FLOPs |
+  |---|---|
+  | Stages (2m + 5 each, m = 1, 2, 3, 4, 5, 5) | 70 |
+  | 5th-order solution | 11 |
+  | Error estimate | 12 |
+  | Error norm and step update | 12 |
+  | **Total** | **105** |
+
+  I had miscounted a stage. The function counts the non-zero coefficients directly from the tableau, so it cannot make this mistake.
+- What was tried: recounted by hand (table above).
+- Resolution: the example now shows 105, and the worked count is written into the docstring.
+- Impact on results / lesson learned: none on results (the function was right). Never type an expected value that was not computed or carefully derived.
+
+## C12: Timings of very short functions were dominated by noise
+- Phase / date: Phase 8 / 2026-10-24
+- What happened: in the first ODE benchmark run, functions taking well under a millisecond had a standard deviation comparable to their mean. For example, Euler with 4 steps had mean 44 µs and std 40 µs.
+
+  | Run length | Std ÷ mean, median | Worst |
+  |---|---|---|
+  | under 0.1 ms | **67 %** | **141 %** |
+  | 0.1–1 ms | 15 % | 45 % |
+  | 1–10 ms | 3 % | 25 % |
+  | over 10 ms | 3 % | 9 % |
+
+- How it was detected: sanity check of `time_std_s / time_mean_s` in `reports/phase8_ode.csv`.
+- Root cause: timing ONE call of a 20–100 µs function is at the scale of operating-system scheduling jitter, cache effects and the time.perf_counter call overhead. One interruption changes the measurement by more than the function's own run time.
+- What was tried: the original D74 method (1 warm-up, 7 repeats, one call per repeat). Reporting the minimum helps, but the mean and std stay unreliable.
+- Resolution: `time_function` now CALIBRATES the number of calls per repeat. The warm-up run measures one call; each recorded repeat then runs the function enough times to last at least `min_time_s` (config: 0.01 s = 10 ms), and the time per call is total ÷ calls (the approach of Python's `timeit`). See the re-run result in C13.
+- Impact on results / lesson learned: never trust the timing of one very short call. The first-run ODE and KNN timings are superseded by the re-run.
+
+## C13: Result of the timing fix, and the noise that remains
+- Phase / date: Phase 8 / 2026-10-24
+- What happened: re-running the ODE and KNN benchmarks with calibrated calls per repeat (C12) reduced the noise a lot, but not to zero:
+
+  | Run length | Std ÷ mean before | Std ÷ mean after |
+  |---|---|---|
+  | under 0.1 ms | median 67 % (worst 141 %) | median **2.8 %** (worst 9 %) |
+  | longer runs | median 3–15 % | median 5–6 % |
+
+  One longer run still had a 32 % spread. The fitted KNN scaling exponents moved between the two runs: brute force 1.007 → 1.069, kd-tree 0.17 → 0.23.
+- How it was detected: comparing `time_std_s / time_mean_s` and the exponents in the two runs of `phase8_ode.csv` / `phase8_knn.csv`.
+- Root cause: other programs on the laptop (Windows background processes, the IDE) occasionally take CPU time during a measurement. A single fitted exponent from 6 noisy points also moves with that noise.
+- What was tried: calibration (C12). Closing other programs or pinning the process to one CPU core was not done (not reproducible for a reader).
+- Resolution: partly resolved. Tables report mean, std AND minimum; figures use the minimum, which is least affected by interruptions. Scaling exponents are stated to one decimal place only (about 1.0 for brute force, about 0.2 for the kd-tree), and machine details are recorded in `phase8_machine.json`.
+- Impact on results / lesson learned: timing on a shared laptop is reproducible to a few percent at best. Conclusions are drawn only from large differences (factors of 2 or more), never from small ones.
+
+## C14: The profiler overstated how much the optimisation would gain
+- Phase / date: Phase 8 / 2026-10-24
+- What happened: under cProfile, `predict_held_out` took 67 % of the compute pipeline (2.36 of 3.53 s), so vectorising it promised a large gain:
+
+  | | Under cProfile | Without the profiler (7 repeats) |
+  |---|---|---|
+  | Before | 3.59 s | 2.16 ± 0.04 s |
+  | After | 2.25 s | **1.75 ± 0.02 s** |
+  | Speed-up | 1.6× | **1.23×** |
+
+- How it was detected: comparing the profiled times with the plain repeated timings in `reports/phase8_optimisation.csv`.
+- Root cause: cProfile adds a fixed overhead to EVERY Python function call. The old stint-by-stint version made far more small calls (pandas constructors, per-stint model calls), so the profiler inflated its share. Also, vectorising removed per-call overhead but not the real work: KNN still computes every query-to-training distance (now 0.88 s in the "after" profile, the new top item), and the wear-ODE fits (0.66 s) were untouched.
+- What was tried: nothing more. The brief asks for ONE improvement, and its before/after numbers are reported as measured.
+- Resolution: the reported speed-up is the honest 1.23× (wall clock, no profiler). Results are identical: max |difference| in CV metrics 5.6e-16 and in strategy times 0.0, within the stated 1e-12 s tolerance (test `test_vectorised_prediction_equals_original_loop`).
+- Impact on results / lesson learned: a profile shows WHERE time goes, but its percentages are biased towards code with many small calls. Always confirm a speed-up with plain timings.
+
+## C15: Data-preparation time depends on the operating system's file cache
+- Phase / date: Phase 8 / 2026-10-24
+- What happened: my first measurement of loading and preparing the data from the FastF1/OpenF1 caches was 5.56 s for two calls (about 2.8 s each). Later runs, even the FIRST call in a fresh Python process, took 0.82–0.85 s.
+- How it was detected: comparing the probe output with `phase8_optimisation.csv` and a dedicated fresh-process check (two processes × 3 calls: 0.81–0.85 s).
+- Root cause: the cached files (FastF1 pickles, a requests-cache SQLite database, OpenF1 JSON) are read from disk the first time after they were last touched; afterwards the operating system keeps them in memory, so later reads are much faster. Network time is not involved: all data was cached.
+- What was tried: timing repeated calls (warm). A truly cold measurement would require clearing the OS file cache, which is not practical or reproducible here.
+- Resolution: unresolved by design. Report the warm time (0.85 ± 0.03 s per preparation) and state that a cold first read took about 2.8 s. Data preparation is excluded from the optimisation (D79).
+- Impact on results / lesson learned: I/O timings are dominated by caching outside the program's control; they cannot be compared with compute timings unless the cache state is stated.
+
+## C16: My verification run overwrote the frozen model selection (test-firewall gap)
+- Phase / date: Phase 8 / 2026-10-24
+- What happened: to confirm that the Phase 8 optimisation did not change the Phase 5 results on real data, I re-ran `compare_models.py --stage cv`. That run rewrote `reports/model_selection.json` with a new timestamp (12:42:37 instead of 11:40:30) and a commit made AFTER the test evaluation, which would have destroyed the evidence that the selection was fixed before the 2025 test (D55). It also rewrote `phase5_cv_folds.csv` and `phase5_cv_summary.csv`.
+- How it was detected: `git status` listed the three Phase 5 files as modified; `git diff` showed the new timestamp and commit.
+- Root cause: a gap in D55. The test stage refused to repeat, but nothing stopped the CV stage from overwriting the selection once the test had been run. My own action exposed it.
+- What was tried:
+  1. Compared the overwritten files with the committed ones: the selection was the same, and the numbers differed by at most 6.1e-16. This was a useful side result, confirming D80's equivalence on real data.
+  2. `git checkout` of the three files to restore the committed versions (verified: timestamp 11:40:30, commit 7f7d6eb).
+  3. Added `guard_cv_rerun`: the CV stage now REFUSES when test results exist, unless `--force` is given. Checked: the stage now stops with a FirewallError and leaves the files untouched.
+- Resolution: resolved; files restored, guard added, test `test_cv_rerun_refused_after_the_test_unless_forced`.
+- Impact on results / lesson learned: no results changed (restored from git). Firewalls must protect every artifact, not only the test step. And never "just re-run" a stage whose outputs are frozen evidence; check first whether it writes them.

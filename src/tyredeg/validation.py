@@ -357,6 +357,56 @@ def predict_held_out(model, laps, anchor_laps):
     ...                      "TyreLife": [1.0, 2.0, 3.0], "FuelCorrectedTime": [80.1, 80.2, 80.4]})
     >>> predict_held_out(Linear(), laps, anchor_laps=2)["predicted"].round(6).tolist()
     [80.3]
+
+    Implementation (Phase 8, D80): the original version looped over stints,
+    building pandas objects and calling the model twice per stint; profiling
+    showed it took 67 % of the cross-validation time. This version calls the
+    model ONCE for all laps and finds every stint's offset at once with
+    ``numpy.bincount`` (per-stint sums). It returns the same rows in the
+    same order; :func:`predict_held_out_loop` keeps the original for the
+    equivalence test and the before/after benchmark.
+    """
+    if isinstance(anchor_laps, bool) or not isinstance(anchor_laps, (int, np.integer)) or anchor_laps < 1:
+        raise ValueError(f"anchor_laps must be an integer >= 1, got {anchor_laps!r}.")
+    ordered = laps.sort_values([STINT_COLUMN, LAP_COLUMN], kind="stable").reset_index(drop=True)
+    # Position of each lap within its stint: 0, 1, 2, ... (laps are sorted).
+    position = ordered.groupby(STINT_COLUMN, sort=False).cumcount().to_numpy()
+    is_anchor = position < anchor_laps
+    _, stint_index = np.unique(ordered[STINT_COLUMN].to_numpy(), return_inverse=True)
+    ages = ordered[AGE_COLUMN].to_numpy(float)
+    actual_all = ordered[TIME_COLUMN].to_numpy(float)
+    degradation = np.asarray(model.degradation(ages), dtype=float)
+
+    # Offset of each stint = mean over its anchor laps of (lap time - d(age)).
+    n_stints = int(stint_index.max()) + 1
+    anchor_sums = np.bincount(stint_index[is_anchor], weights=(actual_all - degradation)[is_anchor],
+                              minlength=n_stints)
+    anchor_counts = np.bincount(stint_index[is_anchor], minlength=n_stints)
+    offsets = anchor_sums / anchor_counts
+
+    scored = ~is_anchor
+    if not np.any(scored):
+        raise ValueError(f"No stint has more than {anchor_laps} laps; nothing to score.")
+    predicted = offsets[stint_index[scored]] + degradation[scored]
+    actual = actual_all[scored]
+    rest = ordered[scored]
+    return pd.DataFrame({
+        RACE_COLUMN: rest[RACE_COLUMN].to_numpy(), STINT_COLUMN: rest[STINT_COLUMN].to_numpy(),
+        LAP_COLUMN: rest[LAP_COLUMN].to_numpy(float), AGE_COLUMN: ages[scored],
+        "actual": actual, "predicted": predicted, "residual": predicted - actual,
+    })
+
+
+def predict_held_out_loop(model, laps, anchor_laps):
+    """Original stint-by-stint version of :func:`predict_held_out` (reference only).
+
+    Kept unchanged from Phase 5 so the Phase 8 optimisation can be checked
+    for identical results and timed before/after. Same parameters, returns
+    and errors as :func:`predict_held_out`.
+
+    Example
+    -------
+    >>> predict_held_out_loop(model, laps, 3)  # doctest: +SKIP
     """
     if isinstance(anchor_laps, bool) or not isinstance(anchor_laps, (int, np.integer)) or anchor_laps < 1:
         raise ValueError(f"anchor_laps must be an integer >= 1, got {anchor_laps!r}.")
@@ -402,7 +452,7 @@ def fit_on(spec, laps):
                     laps[STINT_COLUMN].to_numpy())
 
 
-def cross_validate(laps, spec, folds, anchor_laps):
+def cross_validate(laps, spec, folds, anchor_laps, implementation="vectorised"):
     """Evaluate one candidate on every fold.
 
     Parameters
@@ -413,6 +463,9 @@ def cross_validate(laps, spec, folds, anchor_laps):
     folds : list of Fold
         E.g. :func:`leave_one_race_out`.
     anchor_laps : int
+    implementation : str, optional
+        "vectorised" (default, :func:`predict_held_out`) or "loop" (the
+        original :func:`predict_held_out_loop`, for the Phase 8 benchmark).
 
     Returns
     -------
@@ -426,6 +479,10 @@ def cross_validate(laps, spec, folds, anchor_laps):
     -------
     >>> table, scored = cross_validate(c3_laps, spec, leave_one_race_out(c3_laps["RaceId"]), 3)  # doctest: +SKIP
     """
+    predictors = {"vectorised": predict_held_out, "loop": predict_held_out_loop}
+    if implementation not in predictors:
+        raise ValueError(f"implementation must be one of {sorted(predictors)}, got {implementation!r}.")
+    predictor = predictors[implementation]
     rows, predictions = [], []
     for number, fold in enumerate(folds):
         train_mask, test_mask = fold_masks(laps, fold)
@@ -435,7 +492,7 @@ def cross_validate(laps, spec, folds, anchor_laps):
         if len(train) < spec.min_training_laps:
             rows.append({**row, "applicable": False})
             continue
-        scored = predict_held_out(fit_on(spec, train), test, anchor_laps)
+        scored = predictor(fit_on(spec, train), test, anchor_laps)
         scored["fold"] = number
         predictions.append(scored)
         rows.append({**row, "applicable": True,
@@ -758,6 +815,31 @@ def write_selection(path, selection, metadata):
                **metadata, "selection": selection}
     path.write_text(json.dumps(content, indent=2), encoding="utf-8")
     return content
+
+
+def guard_cv_rerun(selection_path, test_results_path, force=False):
+    """Refuse to overwrite the frozen model selection once the test has been run.
+
+    After the single test evaluation, ``model_selection.json`` is the
+    evidence that the selection was fixed BEFORE the test (D55). Re-running
+    the cross-validation stage would overwrite it with a later timestamp and
+    commit, so it is only allowed with ``force`` (added after C16).
+
+    Raises
+    ------
+    FirewallError
+        If a selection file and test results both exist and ``force`` is False.
+
+    Example
+    -------
+    >>> guard_cv_rerun("reports/model_selection.json", "reports/phase5_test_results.csv")  # doctest: +SKIP
+    """
+    if Path(selection_path).exists() and Path(test_results_path).exists() and not force:
+        raise FirewallError(
+            f"{Path(test_results_path).name} exists: the test race has already been evaluated, so the "
+            f"frozen {Path(selection_path).name} must not be overwritten. Use --force only if you "
+            f"deliberately want a new selection (and say so in the report)."
+        )
 
 
 def load_selection(path):

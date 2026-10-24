@@ -261,3 +261,28 @@ sensitivity:
   alternative_models: ["polynomial degree 2", "wear ODE", "knn k=100 uniform"]
   # Alternative stint-limit rules (minimum clean laps at the maximum age). (D67)
   alternative_min_laps: [3, 10]
+
+# =============================================================================
+# Phase 8: performance benchmarks. Decided by AI without prior approval
+# (Phase 8), to be reviewed. (D74-D81)
+# =============================================================================
+performance:
+  # Timing: unrecorded warm-up runs, then recorded repeats (mean, std, min). (D74)
+  warmup: 1
+  repeats: 7
+  # Each recorded repeat runs the function enough times to last at least
+  # this long [s]; the time per call is reported (C12). (D74)
+  min_time_per_repeat_s: 0.01
+  # Wear ODE benchmark (dd/dn = 0.05 + 0.03 d over 40 laps, as in Phase 3):
+  # fixed-step solvers use 40 / n steps for these n; RK45 these rtol values
+  # (atol = rtol / 1000). (D75)
+  ode_step_counts: [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
+  rk45_rtols: [1.0e-2, 1.0e-3, 1.0e-4, 1.0e-5, 1.0e-6, 1.0e-7, 1.0e-8, 1.0e-9, 1.0e-10, 1.0e-11, 1.0e-12]
+  # KNN scaling: training-set sizes, number of queries, k. (D77)
+  knn_train_sizes: [500, 1000, 2000, 4000, 8000, 16000]
+  knn_queries: 1000
+  knn_k: 50
+  # Least-squares ill-conditioning: polynomial degrees on tyre ages 1-41. (D78)
+  lsq_degrees: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  # Number of functions kept from the cProfile output. (D79)
+  profile_top: 25

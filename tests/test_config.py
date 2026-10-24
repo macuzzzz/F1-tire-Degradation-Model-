@@ -40,6 +40,7 @@ def valid_raw_config():
         "validation": copy.deepcopy(PROJECT_RAW["validation"]),
         "strategy": {**copy.deepcopy(PROJECT_RAW["strategy"]), "data_years": [2023]},
         "sensitivity": copy.deepcopy(PROJECT_RAW["sensitivity"]),
+        "performance": copy.deepcopy(PROJECT_RAW["performance"]),
     }
 
 
@@ -267,6 +268,36 @@ def test_sensitivity_section_values():
 def test_invalid_sensitivity_values_are_rejected(key, value, error):
     raw = valid_raw_config()
     raw["sensitivity"][key] = value
+    with pytest.raises(error):
+        config_from_dict(raw)
+
+
+def test_performance_section_values():
+    from tyredeg.performance import DEFAULT_MIN_TIME_S, DEFAULT_REPEATS, DEFAULT_WARMUP
+
+    performance = load_config(REPO_ROOT / "config.yaml").performance
+    assert (performance.warmup, performance.repeats) == (DEFAULT_WARMUP, DEFAULT_REPEATS) == (1, 7)
+    assert performance.min_time_per_repeat_s == DEFAULT_MIN_TIME_S == 0.01
+    assert performance.ode_step_counts[0] == 4 and performance.ode_step_counts[-1] == 4096
+    assert len(performance.rk45_rtols) == 11
+    assert performance.knn_train_sizes == (500, 1000, 2000, 4000, 8000, 16000)
+    assert performance.lsq_degrees == tuple(range(1, 13))
+
+
+@pytest.mark.parametrize(
+    "key, value, error",
+    [
+        ("repeats", 0, ValueError),
+        ("warmup", -1, ValueError),
+        ("min_time_per_repeat_s", 0.0, ValueError),
+        ("rk45_rtols", [1e-3, -1e-6], ValueError),
+        ("knn_k", 100000, ValueError),
+        ("lsq_degrees", [0, 1], ValueError),
+    ],
+)
+def test_invalid_performance_values_are_rejected(key, value, error):
+    raw = valid_raw_config()
+    raw["performance"][key] = value
     with pytest.raises(error):
         config_from_dict(raw)
 

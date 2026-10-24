@@ -1252,6 +1252,172 @@ One-at-a-time margins (one-stop minus two-stop) [s], from `phase7_oat.csv`, nomi
 
 ---
 
+# Phase 8: performance and optimisation
+
+**For Phase 8 only, the decision protocol was overridden:** every decision below was made by the AI and implemented straight away. **Each is to be reviewed by me.** Problems met are in `CHALLENGES.md` (C11–C15). Evidence: `reports/phase8_*.csv`, `reports/phase8_machine.json` and `reports/figures/phase8_*.png` from `scripts/benchmark.py`; settings in the `performance:` section of config.yaml.
+
+**Machine** (`phase8_machine.json`): Windows 11 (10.0.26300), AMD64 processor (Family 25 Model 124), 12 logical CPUs, Python 3.13.15, NumPy 2.2.6, pandas 2.3.3, SciPy 1.15.3, scikit-learn 1.7.2. Other programs were running (an ordinary laptop).
+
+## D74: How timing is measured
+- Phase / date: Phase 8 / 2026-10-24
+- Options considered: (a) one timed call per repeat; (b) calls per repeat calibrated to a minimum duration (as Python's `timeit` does); (c) the `timeit` module itself.
+- Decision:
+  - `time.perf_counter`; **1 unrecorded warm-up run, then 7 recorded repeats**, with `gc.collect()` before timing.
+  - **Each repeat runs the function enough times to last at least 10 ms; the time per call is reported** (option (b), adopted after C12).
+  - Report mean, std and minimum. Figures use the minimum.
+  - Machine and library versions are saved with the results.
+  - Memory uses `tracemalloc` (it sees NumPy buffers but not all compiled-library memory, so scikit-learn peaks are lower bounds).
+- Justification: the warm-up removes first-call costs, repeats give the spread, and the minimum is least affected by other processes. **Option (a) failed for short functions:** std ÷ mean had a median of 67 % below 0.1 ms (C12). Calibration reduced it to 2.8 % (C13). Option (c) is equivalent but hides the method.
+- Source / evidence: `phase8_ode.csv` before/after (C12, C13).
+- How it is validated: `test_time_function_runs_warmup_and_repeats`, `test_time_function_calibrates_calls_for_short_functions`, `test_peak_memory_sees_numpy_allocations`.
+- **Decided by AI without prior approval (Phase 8), to be reviewed by me.**
+
+## D75: ODE benchmark: problem, step sizes and RK45 tolerances
+- Phase / date: Phase 8 / 2026-10-24
+- Options considered: the fitted real ODE (b ≈ 0.001, almost linear) or the Phase 3 test problem.
+- Decision: the wear ODE dd/dn = 0.05 + 0.03·d over 40 laps (the Phase 3 problem; with b ≈ 0 every method would look exact).
+  - Fixed-step solvers: h = 40/n for n = 4, 8, …, 4096 (h from 10 down to 0.0098 laps).
+  - RK45: rtol = 1e-2 … 1e-12 with atol = rtol/1000.
+  - Plus the exact solution at 41 tyre ages.
+- Justification: the range spans from unusable to round-off-limited accuracy for every method.
+- Source / evidence (`phase8_ode.csv`, `phase8_ode_error_vs_cost.png`): the cheapest run reaching each accuracy.
+
+  | Method | Error ≤ 1 ms (timing resolution) | Error ≤ 1e-8 s |
+  |---|---|---|
+  | Euler | 4096 f evaluations, 18 ms | — |
+  | Heun | 128 f evaluations, 0.58 ms | — |
+  | RK4 | **16** f evaluations, 0.09 ms | 256 f evaluations, 1.27 ms |
+  | RK45 | 25 f evaluations, 0.19 ms | **103** f evaluations, 0.75 ms |
+  | Exact solution | | **0.009 ms** for all 41 ages, error 0 |
+
+  The exact solution is cheapest by far. RK4 runs at only **1.35 MFLOP/s (4.6 µs per f evaluation)**: run time is dominated by Python overhead, not arithmetic.
+- How it is validated: errors match Phase 3's orders of convergence.
+- **Decided by AI without prior approval (Phase 8), to be reviewed by me.**
+
+## D76: FLOP-counting convention
+- Phase / date: Phase 8 / 2026-10-24
+- Options considered: count only +, −, ×, ÷; also count special functions; weight special functions (for example exp ≈ 20).
+- Decision:
+  - **1 FLOP = one +, −, × or ÷ of floating-point numbers.**
+  - exp, sqrt, a power, abs and max each count as **1** (stated wherever they are used; in hardware they cost about 10–50).
+  - Indexing, comparisons and Python overhead are not counted.
+  - Cost of f for the wear ODE: **2** (one ×, one +).
+  - Counts are for a scalar state.
+- Justification: simple, and the derivations are written out in the code comments.
+- Source / evidence: per-step counts with f_flops = 2, derived in the docstrings of `performance.py`:
+
+  | Method | FLOPs per step | General formula |
+  |---|---|---|
+  | Euler | **5** | f + 3 |
+  | Heun | **11** | 2f + 7 |
+  | RK4 | **25** | 4f + 17 |
+  | RK45 (per attempt) | **105** | 6f + 93, counted from the Butcher tableau's non-zero entries |
+
+  A rejected RK45 step costs as much as an accepted one. **FLOPs do not predict run time here** (D75: Python overhead dominates).
+- How it is validated: `test_flops_per_step_match_hand_counts`, `test_flops_scale_with_cost_of_f`, `test_solver_flops_totals`; my own hand count was wrong once (C11).
+- **Decided by AI without prior approval (Phase 8), to be reviewed by me.**
+
+## D77: KNN scaling test
+- Phase / date: Phase 8 / 2026-10-24
+- Options considered: data with whole-lap tyre ages (many ties) or continuous data.
+- Decision:
+  - Training sizes n = 500, 1000, 2000, 4000, 8000, 16000; 1000 queries; k = 50; one continuous feature (seed 42; no ties, so both methods must agree exactly).
+  - My brute force against scikit-learn's `KNeighborsRegressor(algorithm="kd_tree")`, timing fit + predict.
+  - Memory with tracemalloc.
+  - Scaling exponent = slope of log(time) against log(n), fitted with my least squares.
+- Justification: the theory to compare against (m queries, n points, d features):
+  - **Brute force:** time O(m·n·d), memory O(block·n), with blocks of 512 queries.
+  - **kd-tree:** build O(n log n), query about O(m·(log n + k)) for small d.
+- Source / evidence (`phase8_knn.csv`, `phase8_knn_scaling.png`):
+
+  | | Mine (brute force) | scikit-learn kd-tree |
+  |---|---|---|
+  | Time ∝ n^ | **1.07** (≈ linear) | **0.23** (≈ logarithmic) |
+  | At n = 16000 | 0.294 s | 0.0059 s (**50× faster**) |
+  | Peak memory | **8.5 MB → 270 MB** (linear in n) | about 1.4 MB (a lower bound) |
+
+  Predictions are identical (max difference 0.0). The exponents vary by about ±0.06 between runs (C13).
+- How it is validated: KNN equality with scikit-learn is also tested in Phase 4.
+- **Decided by AI without prior approval (Phase 8), to be reviewed by me.**
+
+## D78: Least-squares ill-conditioning test
+- Phase / date: Phase 8 / 2026-10-24
+- Options considered: n/a.
+- Decision: polynomial degrees 1–12 on tyre ages 1–41, unscaled and scaled to [−1, 1]. Noise-free data from known coefficients, with the exact reference computed by binomial expansion. Compare my normal equations, QR (numpy QR + my back substitution) and SVD (`numpy.linalg.lstsq`). Report cond(X) and cond(XᵀX).
+- Justification: covers the range from well-conditioned to numerically singular (cond(X) from 49 to 2.7e21).
+- Source / evidence (`phase8_least_squares.csv`, `phase8_least_squares_conditioning.png`), unscaled:
+
+  | Method | Behaviour |
+  |---|---|
+  | Normal equations | Warns from degree 4 (cond(XᵀX) = 3.6e13); **refuses as singular from degree 7** |
+  | QR | Error ≤ 1e-7 up to degree 9; refuses from degree 10 |
+  | **SVD (`lstsq`)** | **Never refuses, but is silently 98–100 % wrong from degree 9**: its default `rcond` drops small singular values and returns a minimum-norm solution |
+
+  - Scaled: every method is accurate to degree 12 (normal equations 2.5e-9, QR and SVD ≤ 5e-13).
+  - Speed: `lstsq` (compiled LAPACK) 0.007–0.021 ms; my methods 0.1–0.5 ms.
+- How it is validated: consistent with Phase 3 (D35).
+- **Decided by AI without prior approval (Phase 8), to be reviewed by me.**
+
+## D79: Profiling scope (data loading and network excluded)
+- Phase / date: Phase 8 / 2026-10-24
+- Options considered: profile everything, including loading; profile the compute only; profile both separately.
+- Decision: **profile the compute pipeline only:** Phase 5 cross-validation of every candidate for C3 and C4, plus the Phase 6 strategy inputs and comparison, on prepared data. **Network time is excluded** (all data was already cached). Data preparation from the caches is timed separately (3 repeats) and not optimised.
+- Justification: loading is I/O-bound and cache-dependent (C15); mixing it in would hide the compute bottleneck.
+- Source / evidence:
+  - Data preparation: **0.85 ± 0.03 s** warm; about 2.8 s per call with a cold OS file cache (C15).
+  - Compute: 2.16 s (before the optimisation).
+  - Profiles: `phase8_profile_before.csv` / `after.csv` (top 25 functions by cumulative time).
+- How it is validated: `test_machine_info_and_profile`.
+- **Decided by AI without prior approval (Phase 8), to be reviewed by me.**
+
+## D80: The bottleneck and the one optimisation
+- Phase / date: Phase 8 / 2026-10-24
+- Options considered (from the "before" profile, 3.53 s under cProfile):
+  - (a) **vectorise `predict_held_out`**: 2.36 s (67 %), which looped over every held-out stint, built pandas objects and called the model twice per stint (3480 KNN predictions);
+  - (b) speed up the wear-ODE fits (0.66 s, an RK4 Python loop);
+  - (c) data preparation (excluded, D79).
+- Decision: **(a)**. Call the model **once** for all held-out laps, compute every stint's anchor offset with `numpy.bincount`, and build one table. The original is kept as `predict_held_out_loop` (reference), selectable through `cross_validate(..., implementation=...)`.
+- Justification: the largest share of the profile, and the change cannot alter the arithmetic.
+- Source / evidence (`phase8_optimisation.csv`):
+
+  | | Before | After |
+  |---|---|---|
+  | Compute pipeline, wall clock (7 repeats) | 2.16 ± 0.04 s | **1.75 ± 0.02 s** |
+  | `predict_held_out` under cProfile | 2.36 s | 1.09 s |
+
+  - **Speed-up: 1.23×**, less than the profile suggested (C14).
+  - **Results identical:** max |difference| 5.6e-16 in the CV metrics and 0.0 in the strategy times (tolerance 1e-12 s).
+  - The next bottleneck is now KNN distance computation (0.88 s), followed by the ODE fits (0.66 s).
+- How it is validated: **`test_vectorised_prediction_equals_original_loop`** (5 model types × anchors 1, 3, 5, shuffled input; tolerance 1e-12 s) and `test_cross_validation_identical_with_both_implementations`.
+- **Decided by AI without prior approval (Phase 8), to be reviewed by me.**
+
+## D81: Strategy optimiser benchmark
+- Phase / date: Phase 8 / 2026-10-24
+- Options considered: n/a.
+- Decision: time brute force, secant and Newton on the real Phase 6 inputs, (i) with the stint limits (6 feasible laps) and (ii) with them relaxed (69 laps), plus the two-stop brute force.
+- Justification: the cost comparison depends on the size of the search space.
+- Source / evidence (`phase8_strategy.csv`):
+
+  | Case | Brute force | Secant | Newton |
+  |---|---|---|---|
+  | (i) with stint limits | **6 evaluations, 0.28 ms** | 9 evaluations, 0.38 ms | 18 evaluations, 0.69 ms |
+  | (ii) limits relaxed | 69 evaluations, 3.3 ms | **12 evaluations, 0.56 ms** | 21 evaluations, 0.89 ms |
+
+  - In case (i) brute force is fastest; in case (ii) secant is **5.9× faster**.
+  - All methods agree: pit lap 35 in case (i), 33 in case (ii).
+  - Two-stop brute force: 818 combinations in 2.9 ms.
+- How it is validated: method agreement (Phase 6 tests).
+- **Decided by AI without prior approval (Phase 8), to be reviewed by me.**
+
+## D55 amendment: the CV stage may not overwrite the selection after the test (Phase 8)
+After C16 (a verification re-run overwrote the frozen `model_selection.json`;
+restored from git), `compare_models.py --stage cv` refuses to run when the test
+results exist, unless `--force` is given (`guard_cv_rerun`, tested). The
+committed selection (11:40:30 UTC, commit 7f7d6eb) is unchanged.
+**Decided by AI without prior approval (Phase 8), to be reviewed by me.**
+
+---
+
 # Open issues (need my decision)
 
 ## OI-7: Degradation changes from year to year (found by the final test) — RESOLVED: D56–D58 (Phase 6); (d) year scenarios in D67 (Phase 7) — the year effect can flip the strategy

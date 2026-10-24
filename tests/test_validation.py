@@ -344,3 +344,16 @@ def test_test_run_happens_once_unless_forced(tmp_path):
     guard_test_run(results, log, force=True)  # forced repeat allowed ...
     lines = log.read_text().splitlines()
     assert len(lines) == 2 and "FORCED" in lines[1]  # ... and logged
+
+
+def test_cv_rerun_refused_after_the_test_unless_forced(tmp_path):
+    from tyredeg.validation import guard_cv_rerun
+
+    selection, results = tmp_path / "model_selection.json", tmp_path / "test_results.csv"
+    guard_cv_rerun(selection, results)          # nothing exists yet: allowed
+    selection.write_text("{}")
+    guard_cv_rerun(selection, results)          # selection but no test yet: allowed
+    results.write_text("done")
+    with pytest.raises(FirewallError, match="must not be overwritten"):
+        guard_cv_rerun(selection, results)      # after the test: refused
+    guard_cv_rerun(selection, results, force=True)  # deliberate override allowed
