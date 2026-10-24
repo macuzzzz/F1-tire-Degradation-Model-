@@ -1,0 +1,14 @@
+# Direct dependencies, pinned to exact versions (decision D11 in DECISIONS.md).
+# Verify each version exists at https://pypi.org/project/<name>/<version>/
+# The full transitive environment is frozen in requirements-lock.txt.
+fastf1==3.8.3
+pandas==2.3.3
+numpy==2.2.6
+scipy==1.15.3
+matplotlib==3.10.8
+scikit-learn==1.7.2
+pytest==8.4.2
+pytest-html==4.1.1
+pdoc==15.0.4
+PyYAML==6.0.3
+requests==2.34.2

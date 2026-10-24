@@ -1,0 +1,28 @@
+problem,rule,method,iterations,abs_error,status
+x^2 - 2 (simple root),step only,bisection,34,4.705502654189786e-11,ok
+x^2 - 2 (simple root),step only,secant,7,0.0,ok
+x^2 - 2 (simple root),step only,newton,5,0.0,ok
+x^2 - 2 (simple root),residual only,bisection,38,2.3869795029440866e-13,ok
+x^2 - 2 (simple root),residual only,secant,6,2.220446049250313e-16,ok
+x^2 - 2 (simple root),residual only,newton,5,0.0,ok
+x^2 - 2 (simple root),either (approved),bisection,34,4.705502654189786e-11,ok
+x^2 - 2 (simple root),either (approved),secant,6,2.220446049250313e-16,ok
+x^2 - 2 (simple root),either (approved),newton,5,0.0,ok
+"(x - 1)^3 (flat, triple root)",step only,bisection,34,2.3283153183228933e-11,ok
+"(x - 1)^3 (flat, triple root)",step only,secant,74,2.498621309854343e-10,ok
+"(x - 1)^3 (flat, triple root)",step only,newton,55,1.4457035568682386e-10,ok
+"(x - 1)^3 (flat, triple root)",residual only,bisection,12,9.765625000013323e-05,ok
+"(x - 1)^3 (flat, triple root)",residual only,secant,29,7.820857165807826e-05,ok
+"(x - 1)^3 (flat, triple root)",residual only,newton,22,9.356002750005032e-05,ok
+"(x - 1)^3 (flat, triple root)",either (approved),bisection,12,9.765625000013323e-05,ok
+"(x - 1)^3 (flat, triple root)",either (approved),secant,29,7.820857165807826e-05,ok
+"(x - 1)^3 (flat, triple root)",either (approved),newton,22,9.356002750005032e-05,ok
+exp(10 x) - 2 (steep),step only,bisection,31,8.893134839649264e-11,ok
+exp(10 x) - 2 (steep),step only,secant,8,0.0,ok
+exp(10 x) - 2 (steep),step only,newton,6,1.3877787807814457e-17,ok
+exp(10 x) - 2 (steep),residual only,bisection,40,1.7236212457305555e-14,ok
+exp(10 x) - 2 (steep),residual only,secant,8,0.0,ok
+exp(10 x) - 2 (steep),residual only,newton,6,1.3877787807814457e-17,ok
+exp(10 x) - 2 (steep),either (approved),bisection,31,8.893134839649264e-11,ok
+exp(10 x) - 2 (steep),either (approved),secant,8,0.0,ok
+exp(10 x) - 2 (steep),either (approved),newton,6,1.3877787807814457e-17,ok

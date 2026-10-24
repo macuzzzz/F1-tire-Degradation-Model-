@@ -1,0 +1,158 @@
+# =============================================================================
+# Project configuration for the F1 tyre-degradation project.
+#
+# Every numerical choice lives here (decision protocol rule E), not in the code.
+# Each value is checked by src/tyredeg/config.py when it is loaded.
+# The "D<n>" tags point to the matching entry in DECISIONS.md.
+#
+# `null` means "not decided yet": the key exists so the structure is complete,
+# but its value will be chosen (and approved) in a later phase.
+# =============================================================================
+
+# Seed for every random number generator in the project (rule 11).
+# The value itself is arbitrary; recording it makes results reproducible. (D12)
+random_seed: 42
+
+data:
+  # Session identifier. "R" = the race. Only "R" is supported. (D8)
+  session: R
+
+  # Races used in the project. (D3, D4, D5, D14)
+  #   role:   train -> used for fitting and cross-validation (model selection)
+  #           test  -> held out; evaluated ONCE at the very end
+  #   source: fastf1 -> FastF1 free mirror (2021-2022 only)
+  #           openf1 -> OpenF1 web API (free from 2023 onward)
+  # `event` must be the official event name; the loaders check that the data
+  # source returns exactly this event and refuse fuzzy matches. (D7)
+  races:
+    - {year: 2022, event: "Hungarian Grand Prix", role: train, source: fastf1}
+    - {year: 2023, event: "Hungarian Grand Prix", role: train, source: openf1}
+    - {year: 2024, event: "Hungarian Grand Prix", role: train, source: openf1}
+    - {year: 2025, event: "Hungarian Grand Prix", role: test,  source: openf1}
+
+  # Which cars to keep. Team names must match the `Team` column exactly.
+  # null = keep every team. (D6 amendment: all teams)
+  teams: null
+
+  # Optional extra filter on three-letter driver codes (e.g. ["VER"]).
+  # null = keep every driver. (D6)
+  drivers: null
+
+  # Pirelli compound(s) to model, C0 (hardest) ... C6 (softest). (D4: C3)
+  # At Hungary C3 was the MEDIUM in 2022 and the HARD in 2023-2025.
+  pirelli_compounds: ["C3"]
+
+  # Table mapping each race's SOFT/MEDIUM/HARD to Pirelli compounds, with a
+  # source URL per row. Public information, committed to git. (D16)
+  allocation_file: reference/pirelli_allocation.csv
+
+fastf1:
+  # Folder where FastF1 stores downloaded data. Git-ignored (rule 10). (D9)
+  cache_dir: cache/fastf1
+
+openf1:
+  # Folder for cached OpenF1 JSON responses. Git-ignored (rule 10). (D15)
+  cache_dir: cache/openf1
+  # Pause after every real download [s], to be polite to the free service. (D15)
+  request_delay_s: 0.4
+  # Attempts when OpenF1 answers HTTP 429 "too many requests". (D15)
+  max_retries: 5
+
+race:
+  # Race length [laps], used for every race if set. null = use the value from
+  # the data: FastF1's official lap count, or - where it is missing (OpenF1) -
+  # the highest lap number completed in that race. (D23)
+  total_laps_override: null
+
+fuel:
+  # Fuel-effect coefficient [s of lap time per lap of fuel carried]. (D22)
+  #   corrected time = lap time + k_fuel * (lap number - 1)
+  # i.e. the lap time the car would have run carrying full (lap-1) fuel. (D21)
+  # 0.046 = estimate from the training races (0.0456 +/- 0.0006), which agrees
+  # with the rule of thumb 0.03 s/kg x 110 kg / 70 laps = 0.047.
+  k_fuel: 0.046
+  # Range for the Phase 7 sensitivity analysis [s per lap of fuel]; covers the
+  # published 0.01-0.045 s/kg spread. Must satisfy 0 <= min <= k_fuel <= max.
+  k_fuel_min: 0.015
+  k_fuel_max: 0.070
+
+pit:
+  # Pit-stop time loss [s]. null = estimate it from the training races as the
+  # median of (in-lap + out-lap - 2 x the driver's median clean lap), using
+  # fuel-corrected times and green-flag stops only. (D24) Must be > 0 if set.
+  pit_loss_override: null
+
+cleaning:
+  # Outlier rule (D19): within each stint, fit a robust Theil-Sen line of lap
+  # time vs tyre age and remove laps whose residual is more than
+  # outlier_k x (1.4826 x MAD of the residuals). Must be > 0.
+  outlier_k: 3.0
+
+  # Stints with fewer clean laps than this are dropped. Must be >= 1. (D20)
+  min_stint_laps: 10
+
+# =============================================================================
+# Phase 3: from-scratch numerical methods. The function defaults in
+# src/tyredeg/numerics/ are the SAME values; tests/test_numerics_defaults.py
+# fails if the two ever differ. (D38)
+# NOTE: write large numbers as 1.0e+10, not 1.0e10 - PyYAML (YAML 1.1) reads
+# an exponent without a sign as TEXT, which config.py would reject.
+# =============================================================================
+numerics:
+  ode:
+    # RK45 = Dormand-Prince 5(4) pair, RMS error norm. (D25, D26)
+    # Default tolerances = SciPy's defaults (D29).
+    rtol: 1.0e-3
+    atol: 1.0e-6
+    # First RK45 step = this fraction of the integration interval. (D28)
+    initial_step_fraction: 0.01
+    # RK45 gives up after this many step attempts (accepted + rejected). (D28)
+    max_steps: 10000
+    # Step controller h_new = h * clip(safety * err^(-1/5), min_factor, max_factor). (D27)
+    safety: 0.9
+    min_factor: 0.2
+    max_factor: 10.0
+
+  root_finding:
+    # Stop when |step| <= xtol OR |f(x)| <= ftol, whichever comes first. (D30)
+    xtol: 1.0e-10
+    ftol: 1.0e-12
+    max_iter: 100
+    # Secant/Newton: an iterate with |x| above this counts as diverged. (D31)
+    divergence_limit: 1.0e+10
+
+  differentiation:
+    # Default step h = eps**exponent * max(1, |x|), the theoretical balance of
+    # truncation and round-off error for each formula. (D32)
+    forward_step_exponent: 0.5             # forward/backward, error O(h) + eps/h
+    central_step_exponent: 0.3333333333333333   # central 1st, O(h^2) + eps/h
+    second_step_exponent: 0.25             # central 2nd, O(h^2) + eps/h^2
+
+  linear:
+    # Warn when the 1-norm condition-number estimate exceeds this:
+    # relative error ~ cond * eps = 1e12 * 2.2e-16 ~ 2e-4 (about 4 good digits). (D34)
+    condition_warning_threshold: 1.0e+12
+
+  least_squares:
+    # Map x to [-1, 1] before building polynomial columns. (D35)
+    scale_polynomial_inputs: true
+
+# Tolerances used by the tests to accept a numerical method as correct. (D37)
+verification:
+  # |observed order - theoretical order| allowed for Euler/Heun/RK4.
+  ode_order_tolerance: 0.1
+  # RK45 errors may be up to this multiple of (atol + rtol*|y|).
+  rk45_tolerance_factor: 10.0
+  # My RK45 may use at most this multiple of SciPy's function evaluations.
+  rk45_max_nfev_ratio: 1.5
+  # Allowed deviation from the theoretical convergence order of root finders.
+  newton_order_tolerance: 0.2
+  secant_order_tolerance: 0.25
+  # |observed order - theoretical order| for finite differences.
+  difference_order_tolerance: 0.1
+  # Relative agreement with numpy.linalg.solve.
+  linear_solver_rtol: 1.0e-12
+  # Relative agreement of least-squares coefficients with numpy.linalg.lstsq.
+  least_squares_rtol: 1.0e-8
+  # Recovered coefficients must lie within this many standard errors of the truth.
+  least_squares_se_multiple: 3.0
