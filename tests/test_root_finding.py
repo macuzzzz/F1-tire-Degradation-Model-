@@ -103,8 +103,21 @@ def test_newton_needs_fewer_iterations_than_secant_and_bisection():
 
 
 # ---------------------------------------------------------------------------
-# Stopping rule (D30)
+# Stopping rule (D30, amended after OI-4: step AND residual + round-off safeguard)
 # ---------------------------------------------------------------------------
+def steep(x):
+    """Steep function (slope ~1e5 at the root x ~ 34.01): the closest floats to
+    the root leave |f| ~ 1e-11, so |f| <= 1e-12 cannot be reached."""
+    return 1e4 * (np.exp(x / 10.0) - 30.0)
+
+
+def steep_prime(x):
+    return 1e3 * np.exp(x / 10.0)
+
+
+STEEP_ROOT = 10.0 * np.log(30.0)
+
+
 def test_tighter_tolerance_gives_more_accurate_root():
     loose = bisection(square_minus_two, 1.0, 2.0, xtol=1e-4, ftol=0.0)
     tight = bisection(square_minus_two, 1.0, 2.0, xtol=1e-12, ftol=0.0)
@@ -112,22 +125,43 @@ def test_tighter_tolerance_gives_more_accurate_root():
     assert abs(tight.root - ROOT_2) < abs(loose.root - ROOT_2)
 
 
-def test_either_tolerance_alone_can_stop_the_iteration():
+def test_both_tests_must_pass_by_default():
+    result = newton(square_minus_two, square_minus_two_prime, 1.0)
+    step = abs(result.history[-1] - result.history[-2])
+    assert step <= 1e-10 and abs(square_minus_two(result.root)) <= 1e-12
+
+
+def test_a_zero_tolerance_switches_that_test_off():
     by_step = newton(square_minus_two, square_minus_two_prime, 1.0, ftol=0.0)
     by_residual = newton(square_minus_two, square_minus_two_prime, 1.0, xtol=0.0)
     assert abs(by_step.root - ROOT_2) < 1e-10
     assert abs(square_minus_two(by_residual.root)) <= 1e-12
 
 
-def test_residual_test_stops_early_on_a_flat_function():
-    # Documented weakness of the residual test (study, N7): for (x-1)^3 the
-    # residual is tiny long before x is accurate, so the "either" rule stops
-    # with |x - 1| ~ 1e-4, whereas the step test alone reaches ~1e-10.
+def test_both_rule_is_accurate_on_a_flat_function():
+    # Study finding (OI-4): for (x-1)^3 the residual test alone stops with
+    # |x - 1| ~ 1e-4 because |f| is tiny long before x is accurate; requiring
+    # a small step as well gives ~1e-10.
     f = lambda x: (x - 1.0) ** 3  # noqa: E731
-    either = bisection(f, 0.5, 1.7)
-    step_only = bisection(f, 0.5, 1.7, ftol=0.0)
-    assert abs(either.root - 1.0) > 1e-5
-    assert abs(step_only.root - 1.0) < 1e-9
+    residual_only = bisection(f, 0.5, 1.7, xtol=0.0)
+    both = bisection(f, 0.5, 1.7)
+    assert abs(residual_only.root - 1.0) > 1e-5
+    assert abs(both.root - 1.0) < 1e-9
+
+
+@pytest.mark.parametrize("method", ["bisection", "secant", "newton"])
+def test_roundoff_safeguard_on_a_steep_function(method):
+    # Without the safeguard, requiring |f| <= 1e-12 here never stops (bisection,
+    # Newton) or ends in a misleading ZeroDerivativeError (secant).
+    runs = {
+        "bisection": lambda: bisection(steep, 30.0, 40.0),
+        "secant": lambda: secant(steep, 30.0, 40.0),
+        "newton": lambda: newton(steep, steep_prime, 35.0),
+    }
+    result = runs[method]()
+    assert abs(steep(result.root)) > 1e-12   # the residual target was unreachable ...
+    # ... yet the root is within a few floating-point spacings of the truth.
+    assert abs(result.root - STEEP_ROOT) <= 8 * np.spacing(STEEP_ROOT)
 
 
 # ---------------------------------------------------------------------------

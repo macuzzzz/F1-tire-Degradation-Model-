@@ -15,9 +15,20 @@ newton      f'(x) and one       quadratic (order 2)     needs f'; fails if
             starting point                              f'(x) = 0
 ==========  ==================  ======================  ========================
 
-Stopping rule (DECISIONS.md D30): stop as soon as EITHER the step is small,
-|x_new - x_old| <= xtol, OR the residual is small, |f(x_new)| <= ftol.
-Setting one tolerance to 0 switches that test off.
+Stopping rule (DECISIONS.md D30, amended by OI-4): stop only when BOTH the
+step is small, |x_new - x_old| <= xtol, AND the residual is small,
+|f(x_new)| <= ftol. Requiring both protects against the two ways a single
+test can stop too early: on a flat function (e.g. (x - 1)^3) |f| is tiny
+long before x is accurate, and on a steep function a small step can still
+leave a large |f|. Setting one tolerance to 0 switches that test off, so
+``ftol=0`` means "step test only" and ``xtol=0`` means "residual test only".
+
+Round-off safeguard: floating-point numbers near x are about eps*|x| apart,
+so for a steep function even the closest representable x can leave
+|f| > ftol. Requiring both tests would then never stop. The iteration
+therefore also stops when the step has shrunk to round-off level,
+|step| <= 4 * eps * |x|: x cannot become any more accurate, so it is
+returned as the best root available in floating point.
 
 Failures (D31) raise a subclass of ``ValueError``:
 :class:`NoSignChangeError`, :class:`ZeroDerivativeError`,
@@ -36,6 +47,12 @@ DEFAULT_XTOL = 1.0e-10
 DEFAULT_FTOL = 1.0e-12
 DEFAULT_MAX_ITER = 100
 DEFAULT_DIVERGENCE_LIMIT = 1.0e10
+
+EPS = np.finfo(float).eps
+# A step of at most this many floating-point spacings (eps * |x|) means x can
+# no longer change meaningfully. Like the pivot tolerance in
+# linear_solvers.py, this is a machine-precision constant, not a tuning choice.
+ROUNDOFF_STEPS = 4
 
 
 class NoSignChangeError(ValueError):
@@ -104,9 +121,16 @@ def _check_iterate(x, divergence_limit, method):
         raise DivergenceError(f"{method} diverged: iterate {x} exceeds the limit {divergence_limit}.")
 
 
-def _is_converged(step, f_value, xtol, ftol):
-    """Stopping rule D30: small step OR small residual."""
-    return abs(step) <= xtol or abs(f_value) <= ftol
+def _is_converged(step, f_value, x, xtol, ftol):
+    """Stopping rule (D30 amended, OI-4): small step AND small residual,
+    or a step so small that x has reached floating-point precision.
+
+    A tolerance of 0 means that test is switched off (always passes).
+    """
+    step_is_small = xtol == 0 or abs(step) <= xtol
+    residual_is_small = ftol == 0 or abs(f_value) <= ftol
+    at_roundoff_level = abs(step) <= ROUNDOFF_STEPS * EPS * abs(x)
+    return (step_is_small and residual_is_small) or at_roundoff_level
 
 
 # ---------------------------------------------------------------------------
@@ -127,9 +151,11 @@ def bisection(f, a, b, xtol=DEFAULT_XTOL, ftol=DEFAULT_FTOL, max_iter=DEFAULT_MA
     a, b : float
         Bracket ends with ``a < b`` and ``f(a) * f(b) <= 0``.
     xtol : float, optional
-        Stop when the half-width of the bracket is <= xtol (>= 0). Default 1e-10.
+        Step tolerance: the half-width of the bracket must be <= xtol (>= 0;
+        0 switches the test off). Default 1e-10. See the module docstring.
     ftol : float, optional
-        Stop when |f(midpoint)| <= ftol (>= 0). Default 1e-12.
+        Residual tolerance: |f(midpoint)| must be <= ftol (>= 0; 0 switches
+        the test off). Default 1e-12.
     max_iter : int, optional
         Maximum iterations (>= 1). Default 100.
 
@@ -150,7 +176,7 @@ def bisection(f, a, b, xtol=DEFAULT_XTOL, ftol=DEFAULT_FTOL, max_iter=DEFAULT_MA
     -------
     >>> result = bisection(lambda x: x**2 - 2, 1.0, 2.0)
     >>> round(result.root, 9), result.iterations
-    (1.414213562, 34)
+    (1.414213562, 38)
     """
     _check_settings(xtol, ftol, max_iter)
     a, b = float(a), float(b)
@@ -170,7 +196,8 @@ def bisection(f, a, b, xtol=DEFAULT_XTOL, ftol=DEFAULT_FTOL, max_iter=DEFAULT_MA
         f_mid = _evaluate(f, midpoint)
         history.append(midpoint)
         half_width = (b - a) / 2.0
-        if half_width <= xtol or abs(f_mid) <= ftol:
+        # The half-width bounds the distance to the root, so it is the step test.
+        if _is_converged(half_width, f_mid, midpoint, xtol, ftol):
             return RootResult(midpoint, iteration, np.array(history))
         # Keep the half in which the sign changes.
         if f_a * f_mid < 0:
@@ -228,7 +255,7 @@ def secant(
     -------
     >>> result = secant(lambda x: x**2 - 2, 1.0, 2.0)
     >>> round(result.root, 12), result.iterations
-    (1.414213562373, 6)
+    (1.414213562373, 7)
     """
     _check_settings(xtol, ftol, max_iter)
     x0, x1 = float(x0), float(x1)
@@ -244,7 +271,7 @@ def secant(
         _check_iterate(x_new, divergence_limit, "secant")
         f_new = _evaluate(f, x_new)
         history.append(x_new)
-        if _is_converged(step, f_new, xtol, ftol):
+        if _is_converged(step, f_new, x_new, xtol, ftol):
             return RootResult(x_new, iteration, np.array(history))
         x0, f0, x1, f1 = x1, f1, x_new, f_new
     raise NotConvergedError(f"secant did not converge in {max_iter} iterations.")
@@ -318,6 +345,6 @@ def newton(
         _check_iterate(x, divergence_limit, "newton")
         f_x = _evaluate(f, x)
         history.append(x)
-        if _is_converged(step, f_x, xtol, ftol):
+        if _is_converged(step, f_x, x, xtol, ftol):
             return RootResult(x, iteration, np.array(history))
     raise NotConvergedError(f"newton did not converge in {max_iter} iterations.")

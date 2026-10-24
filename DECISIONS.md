@@ -464,6 +464,32 @@ Evidence comes from `scripts/numerics_study.py`. It writes tables to `reports/ph
 - How it is validated: `test_either_tolerance_alone_can_stop_the_iteration`, `test_residual_test_stops_early_on_a_flat_function`, `test_last_step_is_shortened_to_hit_t_end`.
 - Proposed by AI, approved by me ("experiment with other methods": done, see OI-4).
 
+## D30 amendment: root-finder stopping rule ("both" + round-off safeguard)
+- Phase / date: Phase 3 / 2026-10-24 (resolves OI-4)
+- Options considered:
+  - (a) keep "either";
+  - (b) step only;
+  - (c) "both": stop only when the step AND the residual are small;
+  - (c′) "both", plus a round-off safeguard.
+- Decision: **(c′)**. Stop when `|step| ≤ xtol` **and** `|f| ≤ ftol`, **or** when the step has shrunk to round-off level, `|step| ≤ 4·eps·|x|`. A tolerance of 0 switches that test off: `ftol = 0` means step only, `xtol = 0` means residual only.
+- Justification:
+  - Each single test can stop too early: the residual test on flat functions, the step test on steep ones. Requiring both takes the stricter result.
+  - **Strict (c) does not work in general.** When the closest floats to the root leave |f| > ftol, it never stops.
+  - The safeguard stops once x can no longer change, returning the best root available in floating point.
+- Source / evidence:
+  - **Strict (c) failure** (before the safeguard), on f = 10⁴·(e^(x/10) − 30), root ≈ 34.01: bisection and Newton raised `NotConvergedError`; secant raised a misleading `ZeroDerivativeError`. "Step only" converged in 5–37 iterations.
+  - **Study with (c′)** (`reports/phase3_root_finding_stopping_rules.csv`): in all 12 method/problem cases, the error is equal to the better of "step only" and "residual only".
+
+    | Problem | (c′) | Step only | Residual only |
+    |---|---|---|---|
+    | Flat root (x − 1)³ | 2.3e-11 to 2.5e-10 | same | 7.8e-5 to 9.8e-5 |
+    | Steep roots, bisection | 7e-15 to 2e-14 | 2.6e-11 to 8.9e-11 | same as (c′) |
+
+  - **Cost:** more iterations only on the flat root (bisection 34 vs 12). x² − 2 now takes 38 bisection and 7 secant iterations (previously 34 and 6).
+  - The factor 4 in the safeguard is a machine-precision constant in the code (like the pivot tolerance), not a tuning value.
+- How it is validated: `test_both_tests_must_pass_by_default`, `test_a_zero_tolerance_switches_that_test_off`, `test_both_rule_is_accurate_on_a_flat_function`, `test_roundoff_safeguard_on_a_steep_function` (all three methods).
+- Proposed by AI. I first chose (c); the AI then found it can fail to terminate, stopped, and proposed (c′), which I approved.
+
 ## D31: Root-finder failure detection
 - Phase / date: Phase 3 / 2026-10-24
 - Options considered: divergence = (a) a non-finite iterate or |x| > 1e10; (b) also |f| increasing for 3 iterations in a row.
@@ -617,7 +643,7 @@ for cross-validation and KNN. Also, Phase 6 requires a one-stop race on two
 *different* compounds (dry-race rule), which a HARD-only model cannot cover on
 its own.
 
-## OI-4: Root-finder stopping rule on flat functions (from the Phase 3 study)
+## OI-4: Root-finder stopping rule on flat functions (from the Phase 3 study) — RESOLVED by the D30 amendment
 With the approved "either" rule (D30), the residual test |f| ≤ 1e-12 can stop
 too early when f is flat near the root: on (x − 1)³ the result is only
 accurate to about 1e-4. A "step only" rule reaches about 1e-10 there, at

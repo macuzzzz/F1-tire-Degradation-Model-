@@ -217,8 +217,15 @@ def study_root_finding():
                                           0.5, 1.7, 1.0),
         "exp(10 x) - 2 (steep)": (lambda x: np.exp(10 * x) - 2.0, lambda x: 10 * np.exp(10 * x),
                                   0.0, 0.2, np.log(2.0) / 10),
+        # |f| <= 1e-12 is unreachable in floating point here (slope ~1e5 at x ~ 34):
+        # this is the case that needs the round-off safeguard (OI-4).
+        "1e4 (exp(x/10) - 30) (steep, large x)": (lambda x: 1e4 * (np.exp(x / 10) - 30.0),
+                                                  lambda x: 1e3 * np.exp(x / 10),
+                                                  30.0, 40.0, 10 * np.log(30.0)),
     }
-    rules = {"step only": dict(ftol=0.0), "residual only": dict(xtol=0.0), "either (approved)": {}}
+    # A tolerance of 0 switches that test off, so these give the three rules.
+    rules = {"step only": dict(ftol=0.0), "residual only": dict(xtol=0.0),
+             "both + round-off safeguard (approved)": {}}
     rows = []
     for problem, (g, gprime, a, b, true_root) in problems.items():
         for rule, tolerances in rules.items():

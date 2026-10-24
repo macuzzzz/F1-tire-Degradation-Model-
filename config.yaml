@@ -114,7 +114,9 @@ numerics:
     max_factor: 10.0
 
   root_finding:
-    # Stop when |step| <= xtol OR |f(x)| <= ftol, whichever comes first. (D30)
+    # Stop when |step| <= xtol AND |f(x)| <= ftol, or when the step has shrunk
+    # to round-off level (4 * eps * |x|). A tolerance of 0 switches that test
+    # off. (D30, amended after OI-4)
     xtol: 1.0e-10
     ftol: 1.0e-12
     max_iter: 100
