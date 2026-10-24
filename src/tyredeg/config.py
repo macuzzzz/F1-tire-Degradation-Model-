@@ -251,6 +251,20 @@ class ValidationSettings:
 
 
 @dataclass(frozen=True)
+class StrategySettings:
+    """Phase 6 strategy settings (``strategy`` section, D56-D66)."""
+
+    data_years: tuple[int, ...]
+    compounds: tuple[str, ...]
+    include_two_stop: bool
+    new_tyres: bool
+    add_fuel_effect: bool
+    min_laps_at_max_age: int
+    root_xtol: float
+    root_ftol: float
+
+
+@dataclass(frozen=True)
 class Config:
     """Validated project configuration.
 
@@ -279,6 +293,7 @@ class Config:
     verification: VerificationSettings
     models: ModelSettings
     validation: ValidationSettings
+    strategy: StrategySettings
 
     @property
     def train_races(self):
@@ -561,6 +576,43 @@ def _parse_validation(raw):
     )
 
 
+def _require_bool(section, key, name):
+    value = _require_key(section, key, name)
+    if not isinstance(value, bool):
+        raise TypeError(f"'{name}.{key}' must be true or false, got {value!r}.")
+    return value
+
+
+def _parse_strategy(raw, races):
+    """Validate the ``strategy`` section (Phase 6)."""
+    section = _require_section(raw, "strategy")
+    name = "strategy"
+    years = _int_list(_require_key(section, "data_years", name), f"{name}.data_years", FIRST_SUPPORTED_YEAR)
+    known_years = {race.year for race in races}
+    unknown = sorted(set(years) - known_years)
+    if unknown:
+        raise ValueError(f"'{name}.data_years' contains years not in data.races: {unknown}.")
+    compounds = _require_string_list(_require_key(section, "compounds", name), f"{name}.compounds",
+                                     VALID_PIRELLI_COMPOUNDS)
+    if compounds is None or len(compounds) < 2:
+        raise ValueError(f"'{name}.compounds' needs at least two compounds (a dry race uses two).")
+    xtol = _require_float(_require_key(section, "root_xtol", name), f"{name}.root_xtol", 0.0)
+    ftol = _require_float(_require_key(section, "root_ftol", name), f"{name}.root_ftol", 0.0)
+    if xtol == 0 and ftol == 0:
+        raise ValueError(f"'{name}': root_xtol and root_ftol cannot both be 0.")
+    return StrategySettings(
+        data_years=years,
+        compounds=compounds,
+        include_two_stop=_require_bool(section, "include_two_stop", name),
+        new_tyres=_require_bool(section, "new_tyres", name),
+        add_fuel_effect=_require_bool(section, "add_fuel_effect", name),
+        min_laps_at_max_age=_require_int(_require_key(section, "min_laps_at_max_age", name),
+                                         f"{name}.min_laps_at_max_age", 1),
+        root_xtol=xtol,
+        root_ftol=ftol,
+    )
+
+
 def config_from_dict(raw):
     """Build a validated :class:`Config` from a plain dictionary.
 
@@ -677,6 +729,7 @@ def config_from_dict(raw):
         verification=_parse_verification(raw),
         models=_parse_models(raw),
         validation=_parse_validation(raw),
+        strategy=_parse_strategy(raw, races),
     )
 
 

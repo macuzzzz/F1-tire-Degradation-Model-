@@ -1,0 +1,13 @@
+strategy,stops,method,pit_laps,stint_lengths,total_time,iterations,nfev,continuous_root,constraint_active,note
+C3 -> C4,1-stop,brute force,35,35+35,5930.827867294689,6,6,,False,
+C3 -> C4,1-stop,secant,35,35+35,5930.827867294689,2,9,32.88975102043927,True,
+C3 -> C4,1-stop,newton,35,35+35,5930.827867294689,3,18,32.88975101615742,True,
+C4 -> C3,1-stop,brute force,35,35+35,5930.827867294689,6,6,,False,
+C4 -> C3,1-stop,secant,35,35+35,5930.827867294689,2,9,37.11024898416137,True,
+C4 -> C3,1-stop,newton,35,35+35,5930.827867294689,2,13,37.1102489967781,True,
+C3 -> C3 -> C4,2-stop,brute force,22 & 44,22+22+26,5929.657972477812,973,973,,False,
+C3 -> C4 -> C3,2-stop,brute force,22 & 48,22+26+22,5929.657972477811,973,973,,False,
+C3 -> C4 -> C4,2-stop,brute force,21 & 45,21+24+25,5926.498874815887,818,818,,False,
+C4 -> C3 -> C3,2-stop,brute force,26 & 48,26+22+22,5929.657972477811,973,973,,False,
+C4 -> C3 -> C4,2-stop,brute force,24 & 45,24+21+25,5926.498874815887,818,818,,False,
+C4 -> C4 -> C3,2-stop,brute force,24 & 49,24+25+21,5926.498874815887,818,818,,False,

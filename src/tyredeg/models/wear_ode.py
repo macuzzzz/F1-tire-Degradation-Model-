@@ -484,6 +484,27 @@ class WearODEModel:
         self._require_fitted()
         return float(np.median(self._offsets))
 
+    def stint_offsets(self):
+        """Fitted base lap time of every training stint [s] (new tyre, fuel-corrected).
+
+        Returns
+        -------
+        dict
+            Stint identifier -> offset [s].
+
+        Raises
+        ------
+        NotFittedError
+            Before ``fit``.
+
+        Example
+        -------
+        >>> model.stint_offsets()["2023_hungarian_grand_prix|VER|2"]  # doctest: +SKIP
+        84.1
+        """
+        self._require_fitted()
+        return {label: float(value) for label, value in zip(self._data.stint_labels, self._offsets)}
+
     # ------------------------------------------------------------------
     # Uncertainty and reporting
     # ------------------------------------------------------------------

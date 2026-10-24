@@ -217,3 +217,28 @@ validation:
   selection_file: reports/model_selection.json
   test_results_file: reports/phase5_test_results.csv
   test_run_log: reports/test_runs.log
+
+# =============================================================================
+# Phase 6: pit-stop strategy. Decided by AI without prior approval (Phase 6),
+# to be reviewed. (D56-D66)
+# =============================================================================
+strategy:
+  # Races whose clean laps the strategy models are REFITTED on (OI-7): the
+  # years with the same C3/C4/C5 allocation (each compound had the same role).
+  # The Phase 5 test result stays the reported accuracy. (D56)
+  data_years: [2023, 2024, 2025]
+  # Compounds a strategy may use (C5: too little data). (D59)
+  compounds: ["C3", "C4"]
+  # Two-stop strategies are also searched by brute force. (D59)
+  include_two_stop: true
+  # Every stint starts on a NEW tyre (tyre age 1 on its first lap). (D61)
+  new_tyres: true
+  # Add the fuel effect back so totals are real race times (strategy-neutral). (D62)
+  add_fuel_effect: true
+  # A stint may last at most the largest tyre age that has at least this many
+  # clean laps in the data, so the models are not extrapolated. (D63)
+  min_laps_at_max_age: 5
+  # Root finding for dT/dL = 0 (central difference has round-off noise, so
+  # the residual test is off). (D64)
+  root_xtol: 1.0e-6
+  root_ftol: 0.0

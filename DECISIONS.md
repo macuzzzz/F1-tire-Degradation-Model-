@@ -981,9 +981,143 @@ consistent with this: +0.0008 s/lap, CI includes 0.
 
 ---
 
+# Phase 6: pit-stop strategy
+
+**For Phase 6 only, the decision protocol was overridden:** every decision below was made by the AI and implemented straight away. **Each is to be reviewed by me.** Problems met along the way are in `CHALLENGES.md` (C1–C6). Evidence: `reports/phase6_*.csv` and `reports/figures/phase6_*.png` from `scripts/optimise_strategy.py`.
+
+## D56: Data window for the strategy models (resolves OI-7, part 1)
+- Phase / date: Phase 6 / 2026-10-24
+- Options considered: (a) the frozen models trained on 2022–24; (b) refit on 2022–2025; (c) refit on races where each compound had the same role; (d) year-to-year spread as uncertainty.
+- Decision: **(c) and (b): refit the model form selected in Phase 5 (polynomial degree 1 for both compounds) on 2023, 2024 and 2025**, the years with the C3/C4/C5 allocation. 2022 is excluded (C3 was the MEDIUM, C4 the SOFT, and some rain was recorded). **(d) is deferred to Phase 7.**
+- Justification: Each compound keeps the same role, and the newest year is included. The test has already run and is locked, so refitting is allowed. **The Phase 5 test result (RMSE 0.94/1.04 s) remains the reported accuracy; strategy numbers for 2025 are in-sample.**
+- Source / evidence: refit rates C3 0.0597 s/lap [0.051, 0.070], C4 0.0551 s/lap [0.045, 0.066] (stint bootstrap). C4 in-sample residuals are within ±0.2 s at every tyre age (OI-6 had shown +0.6 to +1.3 s on the 2022–24 data).
+- How it is validated: Phase 7 sensitivity; `reports/phase6_inputs.csv`.
+- **Decided by AI without prior approval (Phase 6), to be reviewed by me.**
+
+## D57: Demonstration race and reference car
+- Phase / date: Phase 6 / 2026-10-24
+- Options considered: n/a (the only circuit in scope).
+- Decision: **the Hungarian GP, 70 laps** (the same in all 2023–25 races; `race.total_laps_override` remains available). The reference car is the "typical car": its new-C3 base pace is the **median C3 stint offset**, 85.02 s fuel-corrected to full fuel.
+- Justification: Base pace adds the same amount to every strategy with the same number of laps per compound, so it hardly affects the comparison; a typical value gives realistic totals.
+- Source / evidence: `TotalLaps` = 70 for every race.
+- How it is validated: n/a.
+- **Decided by AI without prior approval (Phase 6), to be reviewed by me.**
+
+## D58: Pit loss
+- Phase / date: Phase 6 / 2026-10-24
+- Options considered: the D24 estimate (2022–24, 21.51 s); a re-estimate on the strategy years; an override.
+- Decision: **re-estimate on 2023–2025 with the D24 method: median 20.89 s** (IQR 19.82–22.31 s, 105 green-flag stops). `pit_loss_override` stays null.
+- Justification: Consistent with D56. Pit loss fell between 2022 and 2024, so 2022 would bias it upwards.
+- Source / evidence: race medians 21.48 s (2023), 20.29 s (2024), 20.65 s (2025).
+- How it is validated: D24 tests; the IQR feeds the Phase 7 sensitivity.
+- **Decided by AI without prior approval (Phase 6), to be reviewed by me.**
+
+## D59: Compounds and strategy types
+- Phase / date: Phase 6 / 2026-10-24
+- Options considered: include or exclude C5; one-stop only, or two-stop as well.
+- Decision:
+  - **C3 and C4 only.** C5 is excluded: 62 clean laps, 5 stints, ages ≤ 16 in 2023–25.
+  - **One-stop:** C3 → C4 and C4 → C3.
+  - **Two-stop:** every three-stint sequence from {C3, C4} that uses both compounds (6 sequences), by brute force.
+- Justification: C5 is too sparse to model, so the real "soft" option is missing; that is a limitation. Two-stops are cheap to enumerate (at most 973 combinations each).
+- Source / evidence: clean-lap counts.
+- How it is validated: `test_two_stop_matches_exhaustive_enumeration`, `test_compare_strategies_ranks_and_agrees_across_methods`.
+- **Decided by AI without prior approval (Phase 6), to be reviewed by me.**
+
+## D60: Compound pace difference for the same car
+- Phase / date: Phase 6 / 2026-10-24
+- Options considered: (a) the difference of the two compounds' median offsets; (b) the pooled paired difference for the same driver and race; (c) **the order-balanced paired difference**.
+- Decision: **(c)**. Base pace of a new C4 = base C3 + δ, with **δ = −0.080 s** (C4 faster). δ is the mean of the paired medians for the two stint orders: +0.154 s (C4 first, n = 35) and −0.315 s (C3 first, n = 8).
+- Justification:
+  - (a) mixes different cars (CHALLENGES C1).
+  - (b) is biased by stint order: later stints look faster, and C4 usually starts the race (CHALLENGES C2).
+  - Averaging over the two orders cancels a common order effect.
+- Source / evidence: CHALLENGES C1, C2. The plausible range is −0.32 to +0.15 s; **this is the least certain input.**
+- How it is validated: `test_order_balanced_compound_delta_removes_order_effect` (a planted δ = −0.1 s is recovered despite a 0.25 s order effect); Phase 7 varies δ.
+- **Decided by AI without prior approval (Phase 6), to be reviewed by me.**
+
+## D61: New or used tyres
+- Phase / date: Phase 6 / 2026-10-24
+- Options considered: new sets for every stint; used sets for the start (qualifying wear).
+- Decision: **every stint starts on a new set** (tyre age 1 on its first lap).
+- Justification: Hard and medium race sets are normally new. Used-set wear is not modelled beyond `TyreLife`.
+- Source / evidence: n/a (modelling assumption).
+- How it is validated: n/a.
+- **Decided by AI without prior approval (Phase 6), to be reviewed by me.**
+
+## D62: Fuel effect in the predicted race time
+- Phase / date: Phase 6 / 2026-10-24
+- Options considered: report fuel-corrected totals; add the fuel effect back.
+- Decision: **add it back.** Lap n's time is base + d(age) − k_fuel·(n − 1), with k_fuel = 0.046 s/lap (fuel plus track evolution, D22 restatement).
+- Justification: Gives real race times. The fuel term totals k_fuel·N(N − 1)/2 = 111.09 s for every strategy, so it never changes the ranking.
+- Source / evidence: n/a.
+- How it is validated: `test_fuel_effect_shifts_every_strategy_by_the_same_amount`.
+- **Decided by AI without prior approval (Phase 6), to be reviewed by me.**
+
+## D63: Maximum stint length (no extrapolation)
+- Phase / date: Phase 6 / 2026-10-24
+- Options considered: (a) the largest observed tyre age (C3 55, C4 42); (b) **the largest tyre age with at least 5 clean laps**; (c) at least 10 clean laps (C3 36, C4 31).
+- Decision: **(b): C3 at most 40 laps, C4 at most 35.** Applied in every optimiser.
+- Justification: (a) would trust a single 55-lap stint; (c) would forbid well-supported stints. Resolves OI-6 point 2.
+- Source / evidence: lap counts per tyre age, 2023–25.
+- How it is validated: `test_stint_limit_moves_optimum_to_window_edge`, `test_stint_longer_than_limit_is_rejected`. **The limit is binding for the one-stop result (CHALLENGES C5).**
+- **Decided by AI without prior approval (Phase 6), to be reviewed by me.**
+
+## D64: Continuous relaxation, rounding and checking
+- Phase / date: Phase 6 / 2026-10-24
+- Options considered: piecewise-linear interpolation of the integer race times; **a smooth extension of the degradation sum**.
+- Decision:
+  - **Smooth extension:** each stint's sum d(1) + … + d(n) is replaced by ∫ from ½ to n + ½ of d (midpoint rule). This is exact for linear d at every integer, and in closed form for the polynomial and wear-ODE models. KNN has none, so it uses brute force only.
+  - **Derivative:** dT/dL with my central difference; default step 6e-6 × L ≈ 2e-4 laps, which is fine here (OI-5).
+  - **Root finding:** my secant (started at the feasible-window ends) and Newton (second difference, started at the window centre), with xtol = 1e-6 laps and ftol = 0 (round-off noise in the derivative).
+  - **Rounding:** candidates floor(root) − 1 … ceil(root) + 1, clipped into the feasible window, evaluated with the exact integer race time, and the fastest taken. A root outside the window marks `constraint_active`. If root finding fails, the window ends are compared and a note is recorded. **Brute force is the reference.**
+- Justification: Piecewise-linear interpolation has a derivative that is constant between integers and jumps at each integer, so secant and Newton cannot work on it.
+- Source / evidence:
+
+  | Strategy | Root | Iterations (secant / Newton) | Evaluations (secant / Newton / brute force) |
+  |---|---|---|---|
+  | C3 → C4 | 32.890 | 2 / 3 | 9 / 18 / 6 |
+  | C4 → C3 | 37.110 | 2 / 2 | 9 / 13 / 6 |
+
+  All three methods agree on pit lap 35 for both orders.
+- How it is validated: `test_continuous_relaxation_finds_analytic_optimum` (root 40.1 on the analytic case, both methods, ≤ 3 iterations), `test_rounding_checks_neighbours`, `test_continuous_relaxation_equals_race_time_at_integers_for_linear_models`, `test_wear_ode_continuous_optimum_matches_brute_force`.
+- **Decided by AI without prior approval (Phase 6), to be reviewed by me.**
+
+## D65: Which degradation model the strategy uses
+- Phase / date: Phase 6 / 2026-10-24
+- Options considered: the Phase 5 selected model per compound; another family winner.
+- Decision: **the model selected in Phase 5** (read from `reports/model_selection.json`): polynomial degree 1 for C3 and C4, refitted per D56.
+- Justification: Follows the frozen selection. The KNN alternative is a Phase 7 model-choice sensitivity, which OI-6 requires because the optimal C4 stint (35 laps) is above 25 (C5).
+- Source / evidence: `reports/phase6_inputs.csv`.
+- How it is validated: n/a.
+- **Decided by AI without prior approval (Phase 6), to be reviewed by me.**
+
+## D66: Wear rate by team (OI-8 diagnostic, reported only)
+- Phase / date: Phase 6 / 2026-10-24
+- Options considered: n/a.
+- Decision: report the linear rate per team (teams with at least 4 stints) in `reports/phase6_team_degradation.csv`. The model is unchanged (one rate per compound, D39). The 2022 damp-track check is skipped, since 2022 is dropped (D56).
+- Justification: Quantifies what the shared-rate assumption hides.
+- Source / evidence:
+  - **C3: 0.039 s/lap (Mercedes) to 0.074 s/lap (Kick Sauber).**
+  - **C4: 0.029 s/lap (Aston Martin) to 0.079 s/lap (Ferrari).**
+  - That is a factor of about 2–3 between cars (analytic SEs 0.003–0.008). One shared rate describes a typical car only.
+- How it is validated: n/a (diagnostic).
+- **Decided by AI without prior approval (Phase 6), to be reviewed by me.**
+
+## Phase 6 result (in-sample, typical car, Hungarian GP)
+| Rank | Strategy | Stints (laps) | Predicted time | Gap |
+|---|---|---|---|---|
+| 1 (tie ×3) | two stops, one C3 stint and two C4 stints in any order | 21 C3 + 24 C4 + 25 C4 | 5926.50 s | 0 |
+| 4 (tie ×3) | two stops, two C3 stints and one C4 | 22 + 22 C3, 26 C4 | 5929.66 s | +3.16 s |
+| 7 (tie ×2) | **one stop at lap 35** (C3 → C4 or C4 → C3) | 35 + 35 | 5930.83 s | +4.33 s |
+
+The one-stop optimum is constrained by D63. The unconstrained root is 32.89 laps (C3 first), which would need a 37-lap C4 stint. Margins are small, and ties come from the model having no order effect (CHALLENGES C6). **Phase 7 must test whether "two stops" survives the uncertainty in pit loss, compound delta, wear rate and model choice.**
+
+---
+
 # Open issues (need my decision)
 
-## OI-7: Degradation changes from year to year (found by the final test)
+## OI-7: Degradation changes from year to year (found by the final test) — PARTLY RESOLVED by D56–D58 (Phase 6); (d) the per-year scenarios remain for Phase 7
 The test race degraded less than every training race (above). Also, the same
 compound behaves differently depending on its label/role: C4 used as the
 SOFT (2022) wore about twice as fast as C4 used as the MEDIUM (2023–2024),
@@ -996,7 +1130,13 @@ test result remains the honest accuracy estimate); (c) use only races where
 the compound had the same label (e.g. C4 as MEDIUM: 2023–2025); (d) carry
 the year-to-year spread of the rate into the Phase 7 sensitivity analysis.
 
-## OI-6: The linear C4 model over-predicts degradation on old tyres (Phase 5 residuals)
+**Proposed resolution (to be decided as the first Phase 6 decision; not yet approved):**
+- Refit the selected model forms on **2023–2025 only**. These years share the C3/C4/C5 allocation, so each compound had the same role; 2022 is dropped from the strategy models.
+- Re-estimate the pit loss on 2023–2025.
+- Keep the Phase 5 test result as the reported accuracy; label any 2025 strategy numbers as in-sample.
+- In Phase 7, use the per-year rates as low/middle/high wear scenarios.
+
+## OI-6: The linear C4 model over-predicts degradation on old tyres (Phase 5 residuals) — points 1–2 done in Phase 6 (D56, D63); point 3 → KNN comparison in Phase 7 (C5)
 CV residuals of the selected C4 model (polynomial degree 1) are about +0.6 to
 +1.3 s beyond about 25 laps of tyre age: the data level off at about 2.2 s while
 the line keeps rising. This may be partly selection (only drivers managing their
@@ -1004,6 +1144,11 @@ tyres ran C4 that long; few laps there). Consequence for Phase 6: the strategy
 will be too pessimistic about long C4 stints. To decide in Phase 6, e.g.
 restrict C4 stint lengths to the validated range, or add this to the
 sensitivity analysis.
+
+**Proposed resolution (Phase 6 decision; not yet approved):**
+1. Re-check the C4 residuals after the OI-7 refit on 2023–2025.
+2. Limit each stint to the tyre ages observed for its compound (no extrapolation).
+3. If the optimal C4 stint is 25 laps or fewer, document that OI-6 does not affect the decision. Otherwise, compare against the KNN C4 model as a model-choice sensitivity (Phase 7).
 
 ## OI-1: F1 timing data now requires an F1 TV login (resolved by D14: free sources)
 Since about 15 Oct 2026, `livetiming.formula1.com/static` returns HTTP 401 to
@@ -1035,14 +1180,14 @@ the residual are small), which takes the more accurate result in every study
 case. This matters only if a root finder is applied to a flat function: the
 Phase 4 (dRSS/db = 0) and Phase 6 (dT/dL = 0) roots are expected to be simple.
 
-## OI-5: Finite-difference step scaling for large |x| (from the Phase 3 study)
+## OI-5: Finite-difference step scaling for large |x| (from the Phase 3 study) — checked in Phase 6: no problem for dT/dL (secant converges in 2 iterations, all methods agree; D64)
 The default step is scaled by max(1, |x|) (D32). For sin at x = 10 the
 empirical optimum is 0.1–0.3 × the default, so the scaling makes h too large
 there (errors still ≤ 7e-8). For the planned uses |x| < 1 (the wear-rate
 parameter b), so no change is needed now. Phase 6 differentiates race time
 with respect to the pit lap (|x| ≈ 20–50), where this should be re-checked.
 
-## OI-8: Optional wear-factor diagnostics (not run; reported only if run)
+## OI-8: Optional wear-factor diagnostics — (1) RUN in Phase 6 (D66); (2) skipped because 2022 is dropped (D56)
 Proposed cheap checks that would not change any model:
 (1) degradation rate per team, to show how much assuming one shared rate per
 compound (D39) hides; (2) whether 2022 laps on dry tyres ran on a damp track
@@ -1050,3 +1195,7 @@ compound (D39) hides; (2) whether 2022 laps on dry tyres ran on a damp track
 (traffic) analysis is possible with OpenF1 gaps for 2023+ and FastF1 timing
 for 2022, but defining "in traffic" would need new decisions, so it is not
 proposed unless brought into scope.
+
+**Proposed resolution (Phase 6 decision; not yet approved):** run (1), the
+wear rate by team, reported only. Skip (2) if OI-7 drops 2022. Dirty air
+stays out of scope.

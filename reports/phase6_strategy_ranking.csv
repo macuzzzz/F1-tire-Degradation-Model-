@@ -1,0 +1,9 @@
+rank,strategy,stops,method,pit_laps,stint_lengths,total_time,iterations,nfev,continuous_root,constraint_active,note,gap_to_best_s
+1,C3 -> C4 -> C4,2-stop,brute force,21 & 45,21+24+25,5926.498874815887,818,818,,False,,0.0
+2,C4 -> C4 -> C3,2-stop,brute force,24 & 49,24+25+21,5926.498874815887,818,818,,False,,0.0
+3,C4 -> C3 -> C4,2-stop,brute force,24 & 45,24+21+25,5926.498874815887,818,818,,False,,0.0
+4,C3 -> C4 -> C3,2-stop,brute force,22 & 48,22+26+22,5929.657972477811,973,973,,False,,3.159097661924534
+5,C4 -> C3 -> C3,2-stop,brute force,26 & 48,26+22+22,5929.657972477811,973,973,,False,,3.159097661924534
+6,C3 -> C3 -> C4,2-stop,brute force,22 & 44,22+22+26,5929.657972477812,973,973,,False,,3.1590976619254434
+7,C3 -> C4,1-stop,brute force,35,35+35,5930.827867294689,6,6,,False,,4.32899247880232
+8,C4 -> C3,1-stop,brute force,35,35+35,5930.827867294689,6,6,,False,,4.32899247880232

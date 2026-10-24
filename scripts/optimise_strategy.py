@@ -1,0 +1,224 @@
+"""Phase 6: optimise the pit-stop strategy for the Hungarian GP (DECISIONS.md D56-D66).
+
+Run from the repository root:
+
+    .venv\\Scripts\\python scripts/optimise_strategy.py
+
+Steps:
+1. Refit the model form SELECTED in Phase 5 (reports/model_selection.json)
+   for each strategy compound on the 2023-2025 races (D56).
+2. Build the strategy inputs: base pace of the typical car (median C3 stint
+   offset), order-balanced compound pace delta (D60), stint limits (D63),
+   pit loss estimated from the same races (D58), fuel coefficient.
+3. Optimise every one-stop order with brute force, secant and Newton, and
+   every two-stop sequence by brute force; rank all strategies.
+4. Write reports/phase6_*.csv and reports/figures/phase6_*.png.
+"""
+
+from __future__ import annotations
+
+import logging
+import sys
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from tyredeg.config import load_config  # noqa: E402
+from tyredeg.fuel_correction import estimate_pit_loss  # noqa: E402
+from tyredeg.models.polynomial import PolynomialDegradationModel  # noqa: E402
+from tyredeg.preparation import prepare_laps  # noqa: E402
+from tyredeg.strategy import (  # noqa: E402
+    CompoundModel,
+    compare_strategies,
+    compound_pace_delta,
+    feasible_pit_laps,
+    max_stint_from_data,
+    optimise_brute_force,
+    optimise_continuous,
+    optimise_two_stop,
+    race_time,
+)
+from tyredeg.validation import candidate_models, fit_on, load_selection  # noqa: E402
+
+REPORTS = REPO_ROOT / "reports"
+FIGURES = REPORTS / "figures"
+
+
+def offsets_table(model, compound):
+    """One row per stint: race, driver, stint number, compound, offset [s]."""
+    rows = []
+    for label, offset in model.stint_offsets().items():
+        race, driver, stint = label.split("|")
+        rows.append({"race": race, "driver": driver, "stint": int(stint), "compound": compound,
+                     "offset": offset})
+    return pd.DataFrame(rows)
+
+
+def build_inputs(config):
+    """Fit the selected models on the strategy years and assemble the CompoundModels."""
+    strategy = config.strategy
+    races = [race for race in config.races if race.year in strategy.data_years]
+    prepared = prepare_laps(config, races)
+    clean = prepared.clean
+    selection = load_selection(REPO_ROOT / config.validation.selection_file)["selection"]
+
+    fitted, offsets, limits, info = {}, [], {}, []
+    for compound in strategy.compounds:
+        laps = clean[clean["PirelliCompound"] == compound]
+        specs = {spec.name: spec for spec in candidate_models(compound, config.models)}
+        model_name = selection[compound]["selected"]
+        fitted[compound] = fit_on(specs[model_name], laps)
+        offsets.append(offsets_table(fitted[compound], compound))
+        limits[compound] = max_stint_from_data(laps["TyreLife"], strategy.min_laps_at_max_age)
+        info.append({"compound": compound, "model": model_name, "n_laps": len(laps),
+                     "n_stints": laps["StintId"].nunique(), "max_stint_laps": limits[compound],
+                     "max_observed_age": float(laps["TyreLife"].max()),
+                     "rate_s_per_lap": float(fitted[compound].params()["coefficients"][0])
+                     if model_name.startswith("polynomial") else np.nan})
+    offsets = pd.concat(offsets, ignore_index=True)
+
+    reference = strategy.compounds[0]
+    base_reference = fitted[reference].base_time
+    bases, deltas = {reference: base_reference}, {}
+    for compound in strategy.compounds[1:]:
+        deltas[compound] = compound_pace_delta(offsets, reference, compound)
+        bases[compound] = base_reference + deltas[compound]["delta"]
+
+    if config.pit_loss_override is not None:
+        pit_loss, pit_info = config.pit_loss_override, {"source": "override"}
+    else:
+        estimate = estimate_pit_loss(prepared.all_laps, clean)
+        pit_loss = estimate.median_s
+        pit_info = {"source": "data (median)", "q25": estimate.q25_s, "q75": estimate.q75_s,
+                    "n_stops": estimate.n_stops}
+
+    total_laps_values = clean.groupby("RaceId")["TotalLaps"].first().unique()
+    if config.total_laps_override is not None:
+        total_laps = config.total_laps_override
+    elif total_laps_values.size == 1:
+        total_laps = int(total_laps_values[0])
+    else:
+        raise ValueError(f"Races differ in length {total_laps_values}; set race.total_laps_override.")
+
+    models = {c: CompoundModel(c, fitted[c], bases[c], limits[c]) for c in strategy.compounds}
+    return models, total_laps, pit_loss, pit_info, deltas, pd.DataFrame(info), clean
+
+
+def team_spread(clean, compounds):
+    """OI-8 diagnostic: linear degradation rate per team (teams with >= 4 stints)."""
+    rows = []
+    for compound in compounds:
+        laps = clean[clean["PirelliCompound"] == compound]
+        for team, group in laps.groupby("Team"):
+            if group["StintId"].nunique() < 4:
+                continue
+            model = PolynomialDegradationModel(compound).fit(group["TyreLife"], group["FuelCorrectedTime"],
+                                                             group["StintId"])
+            p = model.params()
+            rows.append({"compound": compound, "team": team, "rate_s_per_lap": p["coefficients"][0],
+                         "analytic_se": p["standard_errors"][0], "n_stints": group["StintId"].nunique()})
+    return pd.DataFrame(rows).sort_values(["compound", "rate_s_per_lap"])
+
+
+def plot_race_time(models, total_laps, pit_loss, k_fuel, add_fuel, methods):
+    compounds = sorted(models)
+    orders = [(a, b) for a in compounds for b in compounds if a != b]
+    fig, axes = plt.subplots(1, len(orders), figsize=(6.5 * len(orders), 4.6), sharey=True)
+    axes = np.atleast_1d(axes)
+    for ax, (first, second) in zip(axes, orders):
+        laps = np.arange(1, total_laps)
+        times = np.array([race_time(int(lap), first, second, models, total_laps, pit_loss, k_fuel, add_fuel,
+                                    enforce_max_stint=False) for lap in laps])
+        window = feasible_pit_laps(first, second, models, total_laps)
+        inside = np.isin(laps, window)
+        ax.plot(laps, times, color="lightgrey", linestyle="--", label="outside stint limits (extrapolated)")
+        ax.plot(laps[inside], times[inside], color="tab:blue", linewidth=2, label="feasible pit laps")
+        rows = methods[methods["strategy"] == f"{first} -> {second}"]
+        best = rows[rows["method"] == "brute force"].iloc[0]
+        lap = int(best["pit_laps"])
+        ax.plot(lap, best["total_time"], "r*", markersize=14, label=f"optimum: lap {lap}")
+        root = rows[rows["method"] == "secant"]["continuous_root"]
+        if len(root) and pd.notna(root.iloc[0]):
+            ax.axvline(root.iloc[0], color="tab:green", linestyle=":", label=f"dT/dL = 0 at {root.iloc[0]:.2f}")
+        ax.set_title(f"One stop: {first} then {second}")
+        ax.set_xlabel("pit lap (laps on the first set)")
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=8)
+        lowest = times[inside].min() if inside.any() else times.min()
+        ax.set_ylim(lowest - 5, lowest + 60)
+    axes[0].set_ylabel("predicted race time [s]")
+    fig.tight_layout()
+    fig.savefig(FIGURES / "phase6_race_time_vs_pit_lap.png", dpi=150)
+    plt.close(fig)
+
+
+def plot_two_stop(models, total_laps, pit_loss, k_fuel, add_fuel, ranking):
+    two = ranking[ranking["stops"] == "2-stop"]
+    if two.empty:
+        return
+    sequence = tuple(two.iloc[0]["strategy"].split(" -> "))
+    first_stops = np.arange(1, total_laps - 1)
+    grid = np.full((total_laps, total_laps), np.nan)
+    for a in first_stops:
+        for b in range(a + 1, total_laps):
+            lengths = (a, b - a, total_laps - b)
+            if all(n <= models[c].max_stint_laps for c, n in zip(sequence, lengths)):
+                from tyredeg.strategy import total_race_time
+                grid[a, b] = total_race_time(sequence, lengths, models, pit_loss, k_fuel, add_fuel)
+    fig, ax = plt.subplots(figsize=(6.5, 5.2))
+    best = np.nanmin(grid)
+    image = ax.imshow(grid.T - best, origin="lower", cmap="viridis", vmax=20, aspect="auto")
+    a, b = np.unravel_index(np.nanargmin(grid), grid.shape)
+    ax.plot(a, b, "r*", markersize=14)
+    ax.set_title(f"Two stops {' -> '.join(sequence)}: time above best [s]")
+    ax.set_xlabel("first pit lap")
+    ax.set_ylabel("second pit lap")
+    fig.colorbar(image, ax=ax)
+    fig.tight_layout()
+    fig.savefig(FIGURES / "phase6_two_stop.png", dpi=150)
+    plt.close(fig)
+
+
+def main():
+    logging.getLogger("fastf1").setLevel(logging.ERROR)
+    config = load_config(REPO_ROOT / "config.yaml")
+    strategy = config.strategy
+    models, total_laps, pit_loss, pit_info, deltas, info, clean = build_inputs(config)
+    k_fuel, add_fuel = config.k_fuel, strategy.add_fuel_effect
+
+    methods, ranking = compare_strategies(models, total_laps, pit_loss, k_fuel, add_fuel,
+                                          strategy.include_two_stop, strategy.root_xtol, strategy.root_ftol)
+    spread = team_spread(clean, strategy.compounds)
+
+    REPORTS.mkdir(exist_ok=True)
+    FIGURES.mkdir(exist_ok=True)
+    inputs = info.assign(base_time_s=[models[c].base_time for c in info["compound"]])
+    inputs.to_csv(REPORTS / "phase6_inputs.csv", index=False)
+    methods.to_csv(REPORTS / "phase6_methods.csv", index=False)
+    ranking.to_csv(REPORTS / "phase6_strategy_ranking.csv", index=False)
+    spread.to_csv(REPORTS / "phase6_team_degradation.csv", index=False)
+    plot_race_time(models, total_laps, pit_loss, k_fuel, add_fuel, methods)
+    plot_two_stop(models, total_laps, pit_loss, k_fuel, add_fuel, ranking)
+
+    pd.set_option("display.width", 220)
+    print(f"Strategy inputs (refit on {list(strategy.data_years)}): {total_laps} laps, pit loss "
+          f"{pit_loss:.2f} s ({pit_info}), k_fuel {k_fuel}, fuel added back: {add_fuel}")
+    print(inputs.round(4).to_string(index=False))
+    for compound, delta in deltas.items():
+        print(f"pace delta {compound} - {strategy.compounds[0]}: {delta}")
+    print("\nOne-stop methods:\n", methods[methods["stops"] == "1-stop"].drop(columns=["stops"])
+          .round(4).to_string(index=False))
+    print("\nStrategy ranking:\n", ranking.round(3).to_string(index=False))
+    print("\nC3 / C4 degradation rate by team (OI-8):\n", spread.round(4).to_string(index=False))
+
+
+if __name__ == "__main__":
+    main()

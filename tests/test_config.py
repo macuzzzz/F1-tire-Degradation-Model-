@@ -38,6 +38,7 @@ def valid_raw_config():
         "verification": copy.deepcopy(PROJECT_RAW["verification"]),
         "models": copy.deepcopy(PROJECT_RAW["models"]),
         "validation": copy.deepcopy(PROJECT_RAW["validation"]),
+        "strategy": {**copy.deepcopy(PROJECT_RAW["strategy"]), "data_years": [2023]},
     }
 
 
@@ -210,6 +211,33 @@ def test_validation_section_values():
 def test_invalid_validation_values_are_rejected(key, value, error):
     raw = valid_raw_config()
     raw["validation"][key] = value
+    with pytest.raises(error):
+        config_from_dict(raw)
+
+
+def test_strategy_section_values():
+    strategy = load_config(REPO_ROOT / "config.yaml").strategy
+    assert strategy.data_years == (2023, 2024, 2025)
+    assert strategy.compounds == ("C3", "C4")
+    assert strategy.new_tyres and strategy.add_fuel_effect and strategy.include_two_stop
+    assert strategy.min_laps_at_max_age == 5
+    assert (strategy.root_xtol, strategy.root_ftol) == (1e-6, 0.0)
+
+
+@pytest.mark.parametrize(
+    "key, value, error",
+    [
+        ("data_years", [2030], ValueError),        # not among the configured races
+        ("compounds", ["C3"], ValueError),         # a dry race needs two compounds
+        ("compounds", ["C3", "SOFT"], ValueError),
+        ("new_tyres", "yes", TypeError),
+        ("min_laps_at_max_age", 0, ValueError),
+        ("root_xtol", -1.0, ValueError),
+    ],
+)
+def test_invalid_strategy_values_are_rejected(key, value, error):
+    raw = valid_raw_config()
+    raw["strategy"][key] = value
     with pytest.raises(error):
         config_from_dict(raw)
 
