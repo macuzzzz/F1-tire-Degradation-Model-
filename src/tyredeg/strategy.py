@@ -85,6 +85,32 @@ class CompoundModel:
             raise TypeError("model must have a degradation(tyre_age) method.")
 
 
+class LinearDegradation:
+    """Degradation d(n) = rate * n with a rate set directly (no fitting).
+
+    Used by the sensitivity analysis to perturb a fitted linear wear rate
+    (e.g. by +/- 2 standard errors) while keeping everything else fixed.
+
+    Parameters
+    ----------
+    rate : float
+        Wear rate [s/lap], finite.
+
+    Example
+    -------
+    >>> LinearDegradation(0.06).degradation([10.0]).tolist()
+    [0.6]
+    """
+
+    def __init__(self, rate):
+        if isinstance(rate, bool) or not np.isfinite(rate):
+            raise ValueError(f"rate must be a finite number, got {rate!r}.")
+        self.rate = float(rate)
+
+    def degradation(self, tyre_age):
+        return self.rate * np.asarray(tyre_age, dtype=float).reshape(-1)
+
+
 def _check_int(value, name, minimum):
     if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
         raise TypeError(f"{name} must be an integer, got {value!r}.")
@@ -321,6 +347,8 @@ def cumulative_degradation(model, n_laps):
     if isinstance(model, WearODEModel):
         p = model.params()
         return float(_ode_antiderivative(p["a"], p["b"], upper) - _ode_antiderivative(p["a"], p["b"], lower))
+    if isinstance(model, LinearDegradation):
+        return float(_poly_antiderivative([model.rate], upper) - _poly_antiderivative([model.rate], lower))
     raise TypeError(
         f"{type(model).__name__} has no closed-form integral; use the brute-force optimiser."
     )
@@ -733,3 +761,153 @@ def compound_pace_delta(offsets, reference, other):
     return {"delta": round((first + second) / 2.0, 12), "median_other_first": first,
             "median_reference_first": second, "n_other_first": len(differences["other_first"]),
             "n_reference_first": len(differences["reference_first"])}
+
+
+# ---------------------------------------------------------------------------
+# Assembling all strategy inputs from prepared data (used by Phases 6 and 7)
+# ---------------------------------------------------------------------------
+@dataclass
+class StrategyInputs:
+    """Everything needed to optimise a strategy, built from data.
+
+    Attributes
+    ----------
+    models : dict
+        {compound: CompoundModel}.
+    total_laps : int
+    pit_loss : float
+        [s].
+    pit_info : dict
+        How the pit loss was obtained (median, quartiles, number of stops).
+    deltas : dict
+        {compound: output of :func:`compound_pace_delta`} for non-reference compounds.
+    info : pandas.DataFrame
+        One row per compound: model, laps, stints, stint limit, rate, base time.
+    k_fuel : float
+        Fuel coefficient used for the fuel correction [s per lap of fuel].
+    """
+
+    models: dict
+    total_laps: int
+    pit_loss: float
+    pit_info: dict
+    deltas: dict
+    info: pd.DataFrame
+    k_fuel: float
+
+
+def _offsets_table(model, compound):
+    """One row per stint: race, driver, stint number, compound, offset [s]."""
+    rows = []
+    for label, offset in model.stint_offsets().items():
+        race, driver, stint = label.split("|")
+        rows.append({"race": race, "driver": driver, "stint": int(stint), "compound": compound,
+                     "offset": offset})
+    return pd.DataFrame(rows)
+
+
+def refuel(laps, k_fuel):
+    """Copy of ``laps`` with FuelCorrectedTime recomputed for another fuel coefficient.
+
+    Cleaning does not depend on k_fuel (the outlier rule uses raw times, D19),
+    so only this column changes.
+
+    Example
+    -------
+    >>> df = pd.DataFrame({"LapTime": [80.0], "LapNumber": [11.0], "TotalLaps": [70.0],
+    ...                    "FuelCorrectedTime": [80.46]})
+    >>> refuel(df, 0.1)["FuelCorrectedTime"].tolist()
+    [81.0]
+    """
+    from tyredeg.fuel_correction import add_fuel_corrected_times
+
+    return add_fuel_corrected_times(laps.drop(columns=["FuelCorrectedTime"]), k_fuel)
+
+
+def build_strategy_inputs(all_laps, clean, config, model_names, k_fuel=None, min_laps_at_max_age=None,
+                          pit_loss_override=None):
+    """Fit the degradation models and assemble the strategy inputs (D56-D63).
+
+    Parameters
+    ----------
+    all_laps, clean : pandas.DataFrame
+        All laps and clean laps (with ``StintId``) of the strategy races,
+        e.g. from :func:`tyredeg.preparation.prepare_laps`.
+    config : Config
+        Project configuration (strategy compounds, model settings, laps).
+    model_names : dict
+        {compound: candidate model name}, e.g. {"C3": "polynomial degree 1"}.
+    k_fuel : float or None, optional
+        Fuel coefficient; None = ``config.k_fuel``. A different value
+        RECOMPUTES the fuel-corrected times and refits everything (Phase 7).
+    min_laps_at_max_age : int or None, optional
+        Stint-limit rule (D63); None = ``config.strategy.min_laps_at_max_age``.
+    pit_loss_override : float or None, optional
+        Use this pit loss [s] instead of estimating it.
+
+    Returns
+    -------
+    StrategyInputs
+
+    Raises
+    ------
+    ValueError
+        For unknown model names, inconsistent race lengths or missing data.
+
+    Example
+    -------
+    >>> inputs = build_strategy_inputs(prep.all_laps, prep.clean, config,
+    ...                                {"C3": "polynomial degree 1", "C4": "polynomial degree 1"})  # doctest: +SKIP
+    """
+    from tyredeg.fuel_correction import estimate_pit_loss
+    from tyredeg.validation import candidate_models, fit_on
+
+    strategy = config.strategy
+    k_fuel = config.k_fuel if k_fuel is None else float(k_fuel)
+    min_laps = strategy.min_laps_at_max_age if min_laps_at_max_age is None else min_laps_at_max_age
+    if k_fuel != config.k_fuel:
+        all_laps, clean = refuel(all_laps, k_fuel), refuel(clean, k_fuel)
+
+    fitted, offsets, limits, info = {}, [], {}, []
+    for compound in strategy.compounds:
+        laps = clean[clean["PirelliCompound"] == compound]
+        specs = {spec.name: spec for spec in candidate_models(compound, config.models)}
+        if model_names[compound] not in specs:
+            raise ValueError(f"Unknown model {model_names[compound]!r} for {compound}.")
+        fitted[compound] = fit_on(specs[model_names[compound]], laps)
+        offsets.append(_offsets_table(fitted[compound], compound))
+        limits[compound] = max_stint_from_data(laps["TyreLife"], min_laps)
+        params = fitted[compound].params()
+        rate = float(params["coefficients"][0]) if params["model"] == "polynomial" else np.nan
+        info.append({"compound": compound, "model": model_names[compound], "n_laps": len(laps),
+                     "n_stints": laps["StintId"].nunique(), "max_stint_laps": limits[compound],
+                     "max_observed_age": float(laps["TyreLife"].max()), "rate_s_per_lap": rate})
+    offsets = pd.concat(offsets, ignore_index=True)
+
+    reference = strategy.compounds[0]
+    bases, deltas = {reference: fitted[reference].base_time}, {}
+    for compound in strategy.compounds[1:]:
+        deltas[compound] = compound_pace_delta(offsets, reference, compound)
+        bases[compound] = bases[reference] + deltas[compound]["delta"]
+
+    if pit_loss_override is not None:
+        pit_loss, pit_info = float(pit_loss_override), {"source": "override"}
+    elif config.pit_loss_override is not None:
+        pit_loss, pit_info = config.pit_loss_override, {"source": "config override"}
+    else:
+        estimate = estimate_pit_loss(all_laps, clean)
+        pit_loss = estimate.median_s
+        pit_info = {"source": "data (median)", "q25": estimate.q25_s, "q75": estimate.q75_s,
+                    "n_stops": estimate.n_stops}
+
+    lengths = clean.groupby("RaceId")["TotalLaps"].first().unique()
+    if config.total_laps_override is not None:
+        total_laps = config.total_laps_override
+    elif lengths.size == 1:
+        total_laps = int(lengths[0])
+    else:
+        raise ValueError(f"Races differ in length {lengths}; set race.total_laps_override.")
+
+    models = {c: CompoundModel(c, fitted[c], bases[c], limits[c]) for c in strategy.compounds}
+    info = pd.DataFrame(info).assign(base_time_s=[bases[c] for c in strategy.compounds])
+    return StrategyInputs(models, total_laps, pit_loss, pit_info, deltas, info, k_fuel)

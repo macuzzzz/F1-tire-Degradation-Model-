@@ -32,84 +32,30 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from tyredeg.config import load_config  # noqa: E402
-from tyredeg.fuel_correction import estimate_pit_loss  # noqa: E402
 from tyredeg.models.polynomial import PolynomialDegradationModel  # noqa: E402
 from tyredeg.preparation import prepare_laps  # noqa: E402
 from tyredeg.strategy import (  # noqa: E402
-    CompoundModel,
+    build_strategy_inputs,
     compare_strategies,
-    compound_pace_delta,
     feasible_pit_laps,
-    max_stint_from_data,
-    optimise_brute_force,
-    optimise_continuous,
-    optimise_two_stop,
     race_time,
+    total_race_time,
 )
-from tyredeg.validation import candidate_models, fit_on, load_selection  # noqa: E402
+from tyredeg.validation import load_selection  # noqa: E402
 
 REPORTS = REPO_ROOT / "reports"
 FIGURES = REPORTS / "figures"
 
 
-def offsets_table(model, compound):
-    """One row per stint: race, driver, stint number, compound, offset [s]."""
-    rows = []
-    for label, offset in model.stint_offsets().items():
-        race, driver, stint = label.split("|")
-        rows.append({"race": race, "driver": driver, "stint": int(stint), "compound": compound,
-                     "offset": offset})
-    return pd.DataFrame(rows)
-
-
 def build_inputs(config):
-    """Fit the selected models on the strategy years and assemble the CompoundModels."""
-    strategy = config.strategy
-    races = [race for race in config.races if race.year in strategy.data_years]
+    """Prepare the strategy races and build the inputs with the shared builder (D56-D63)."""
+    races = [race for race in config.races if race.year in config.strategy.data_years]
     prepared = prepare_laps(config, races)
-    clean = prepared.clean
     selection = load_selection(REPO_ROOT / config.validation.selection_file)["selection"]
-
-    fitted, offsets, limits, info = {}, [], {}, []
-    for compound in strategy.compounds:
-        laps = clean[clean["PirelliCompound"] == compound]
-        specs = {spec.name: spec for spec in candidate_models(compound, config.models)}
-        model_name = selection[compound]["selected"]
-        fitted[compound] = fit_on(specs[model_name], laps)
-        offsets.append(offsets_table(fitted[compound], compound))
-        limits[compound] = max_stint_from_data(laps["TyreLife"], strategy.min_laps_at_max_age)
-        info.append({"compound": compound, "model": model_name, "n_laps": len(laps),
-                     "n_stints": laps["StintId"].nunique(), "max_stint_laps": limits[compound],
-                     "max_observed_age": float(laps["TyreLife"].max()),
-                     "rate_s_per_lap": float(fitted[compound].params()["coefficients"][0])
-                     if model_name.startswith("polynomial") else np.nan})
-    offsets = pd.concat(offsets, ignore_index=True)
-
-    reference = strategy.compounds[0]
-    base_reference = fitted[reference].base_time
-    bases, deltas = {reference: base_reference}, {}
-    for compound in strategy.compounds[1:]:
-        deltas[compound] = compound_pace_delta(offsets, reference, compound)
-        bases[compound] = base_reference + deltas[compound]["delta"]
-
-    if config.pit_loss_override is not None:
-        pit_loss, pit_info = config.pit_loss_override, {"source": "override"}
-    else:
-        estimate = estimate_pit_loss(prepared.all_laps, clean)
-        pit_loss = estimate.median_s
-        pit_info = {"source": "data (median)", "q25": estimate.q25_s, "q75": estimate.q75_s,
-                    "n_stops": estimate.n_stops}
-
-    total_laps_values = clean.groupby("RaceId")["TotalLaps"].first().unique()
-    if config.total_laps_override is not None:
-        total_laps = config.total_laps_override
-    elif total_laps_values.size == 1:
-        total_laps = int(total_laps_values[0])
-    else:
-        raise ValueError(f"Races differ in length {total_laps_values}; set race.total_laps_override.")
-
-    models = {c: CompoundModel(c, fitted[c], bases[c], limits[c]) for c in strategy.compounds}
-    return models, total_laps, pit_loss, pit_info, deltas, pd.DataFrame(info), clean
+    names = {c: selection[c]["selected"] for c in config.strategy.compounds}
+    inputs = build_strategy_inputs(prepared.all_laps, prepared.clean, config, names)
+    return (inputs.models, inputs.total_laps, inputs.pit_loss, inputs.pit_info, inputs.deltas,
+            inputs.info, prepared.clean)
 
 
 def team_spread(clean, compounds):
@@ -171,7 +117,6 @@ def plot_two_stop(models, total_laps, pit_loss, k_fuel, add_fuel, ranking):
         for b in range(a + 1, total_laps):
             lengths = (a, b - a, total_laps - b)
             if all(n <= models[c].max_stint_laps for c, n in zip(sequence, lengths)):
-                from tyredeg.strategy import total_race_time
                 grid[a, b] = total_race_time(sequence, lengths, models, pit_loss, k_fuel, add_fuel)
     fig, ax = plt.subplots(figsize=(6.5, 5.2))
     best = np.nanmin(grid)
@@ -200,7 +145,7 @@ def main():
 
     REPORTS.mkdir(exist_ok=True)
     FIGURES.mkdir(exist_ok=True)
-    inputs = info.assign(base_time_s=[models[c].base_time for c in info["compound"]])
+    inputs = info
     inputs.to_csv(REPORTS / "phase6_inputs.csv", index=False)
     methods.to_csv(REPORTS / "phase6_methods.csv", index=False)
     ranking.to_csv(REPORTS / "phase6_strategy_ranking.csv", index=False)

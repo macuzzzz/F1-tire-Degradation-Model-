@@ -265,6 +265,18 @@ class StrategySettings:
 
 
 @dataclass(frozen=True)
+class SensitivitySettings:
+    """Phase 7 sensitivity settings (``sensitivity`` section, D67-D73)."""
+
+    rate_se_multiples: tuple[int, ...]
+    relative_step: float
+    delta_absolute_step: float
+    check_relative_steps: tuple[float, ...]
+    alternative_models: tuple[str, ...]
+    alternative_min_laps: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class Config:
     """Validated project configuration.
 
@@ -294,6 +306,7 @@ class Config:
     models: ModelSettings
     validation: ValidationSettings
     strategy: StrategySettings
+    sensitivity: SensitivitySettings
 
     @property
     def train_races(self):
@@ -613,6 +626,35 @@ def _parse_strategy(raw, races):
     )
 
 
+def _parse_sensitivity(raw):
+    """Validate the ``sensitivity`` section (Phase 7)."""
+    section = _require_section(raw, "sensitivity")
+    name = "sensitivity"
+    multiples = _require_key(section, "rate_se_multiples", name)
+    if not isinstance(multiples, list) or not multiples:
+        raise TypeError(f"'{name}.rate_se_multiples' must be a non-empty list.")
+    multiples = tuple(_require_int(m, f"{name}.rate_se_multiples entry") for m in multiples)
+    if 0 in multiples:
+        raise ValueError(f"'{name}.rate_se_multiples' must not contain 0 (that is the nominal).")
+    steps = _require_key(section, "check_relative_steps", name)
+    if not isinstance(steps, list) or not steps:
+        raise TypeError(f"'{name}.check_relative_steps' must be a non-empty list.")
+    steps = tuple(_require_float(v, f"{name}.check_relative_steps entry", strictly_positive=True)
+                  for v in steps)
+    models = _require_string_list(_require_key(section, "alternative_models", name),
+                                  f"{name}.alternative_models")
+    min_laps = _int_list(_require_key(section, "alternative_min_laps", name),
+                         f"{name}.alternative_min_laps", 1)
+    return SensitivitySettings(
+        rate_se_multiples=multiples,
+        relative_step=_positive_float(section, "relative_step", name),
+        delta_absolute_step=_positive_float(section, "delta_absolute_step", name),
+        check_relative_steps=steps,
+        alternative_models=models or (),
+        alternative_min_laps=min_laps,
+    )
+
+
 def config_from_dict(raw):
     """Build a validated :class:`Config` from a plain dictionary.
 
@@ -730,6 +772,7 @@ def config_from_dict(raw):
         models=_parse_models(raw),
         validation=_parse_validation(raw),
         strategy=_parse_strategy(raw, races),
+        sensitivity=_parse_sensitivity(raw),
     )
 
 

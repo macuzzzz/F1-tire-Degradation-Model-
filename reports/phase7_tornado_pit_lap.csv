@@ -1,0 +1,9 @@
+input,low,high,low_change,high_change,span
+stint-limit rule,33.0,35.0,-2.0,0.0,2.0
+year-to-year wear,35.0,36.0,0.0,1.0,1.0
+C4 wear rate,35.0,36.0,0.0,1.0,1.0
+C3 wear rate,35.0,36.0,0.0,1.0,1.0
+compound delta C4-C3,35.0,35.0,0.0,0.0,0.0
+pit loss,35.0,35.0,0.0,0.0,0.0
+fuel coefficient k_fuel,35.0,35.0,0.0,0.0,0.0
+degradation model,35.0,35.0,0.0,0.0,0.0

@@ -242,3 +242,22 @@ strategy:
   # the residual test is off). (D64)
   root_xtol: 1.0e-6
   root_ftol: 0.0
+
+# =============================================================================
+# Phase 7: sensitivity analysis. Decided by AI without prior approval
+# (Phase 7), to be reviewed. (D67-D73)
+# k_fuel range: fuel.k_fuel_min / k_fuel_max; pit-loss range: its IQR.
+# =============================================================================
+sensitivity:
+  # Wear rates are varied by these multiples of their stint-bootstrap SE. (D67)
+  rate_se_multiples: [-2, -1, 1, 2]
+  # Central-difference step: relative for inputs far from 0, absolute [s]
+  # for the compound delta (nominal close to 0). (D68)
+  relative_step: 0.01
+  delta_absolute_step: 0.01
+  # Steps used to check that the derivatives do not depend on the step. (D68)
+  check_relative_steps: [0.001, 0.01, 0.1]
+  # Alternative degradation models for the model-choice sensitivity. (D67)
+  alternative_models: ["polynomial degree 2", "wear ODE", "knn k=100 uniform"]
+  # Alternative stint-limit rules (minimum clean laps at the maximum age). (D67)
+  alternative_min_laps: [3, 10]

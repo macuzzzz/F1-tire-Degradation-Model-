@@ -1115,9 +1115,146 @@ The one-stop optimum is constrained by D63. The unconstrained root is 32.89 laps
 
 ---
 
+# Phase 7: sensitivity analysis
+
+**For Phase 7 only, the decision protocol was overridden:** every decision below was made by the AI and implemented straight away. **Each is to be reviewed by me.** Problems met are in `CHALLENGES.md` (C7–C10). Evidence: `reports/phase7_*.csv` and `reports/figures/phase7_*.png` from `scripts/sensitivity_analysis.py`; settings in the `sensitivity:` section of config.yaml.
+
+## D67: Inputs and the ranges tested (one at a time)
+- Phase / date: Phase 7 / 2026-10-24
+- Options considered: ±1/±2 SE for every input; physically motivated ranges per input; the full range only.
+- Decision: physically motivated ranges, each applied alone around the Phase 6 nominal:
+
+  | Input | Nominal | Values tested | Why this range |
+  |---|---|---|---|
+  | Fuel coefficient k_fuel (refits everything) | 0.046 | 0.015, 0.070 | D22 range: published 0.01–0.045 s/kg |
+  | Pit loss | 20.89 s | 19.82, 22.31 s | IQR of the 2023–25 stops (D58) |
+  | C3 wear rate | 0.0597 s/lap | ±1 and ±2 SE (SE = 0.00474) | stint bootstrap (D45) |
+  | C4 wear rate | 0.0551 s/lap | ±1 and ±2 SE (SE = 0.00511) | stint bootstrap (D45) |
+  | Compound delta C4 − C3 | −0.080 s | −0.315, +0.154 s | the two stint-order medians (D60) |
+  | Year-to-year wear (C3 and C4 together) | 0.0597 / 0.0551 | 2025 (0.0451 / 0.0496) and 2024 (0.0749 / 0.0651) | lowest- and highest-wear years; OI-7 (d) |
+  | Degradation model | polynomial degree 1 | polynomial degree 2, wear ODE, KNN k = 100 uniform | the other Phase 5 candidates; OI-6 point 3 |
+  | Stint-limit rule | ≥ 5 laps | ≥ 3, ≥ 10 laps | D63 alternatives |
+
+- Justification: Each range reflects how uncertain that input really is, rather than a uniform ±10 %. The year range resolves OI-7 (d), and the KNN model resolves OI-6 point 3.
+- Source / evidence: `reports/phase7_oat.csv`.
+- How it is validated: the nominal run reproduces Phase 6 exactly (5930.83 / 5926.50 s, L* = 32.890).
+- **Decided by AI without prior approval (Phase 7), to be reviewed by me.**
+
+## D68: Perturbation size for the central-difference coefficients
+- Phase / date: Phase 7 / 2026-10-24
+- Options considered: a relative step of 0.1 %, 1 % or 10 %.
+- Decision:
+  - **h = 1 % of the nominal value** for k_fuel, pit loss and the two wear rates.
+  - **h = 0.01 s** (absolute) for the compound delta, whose nominal is close to 0.
+  - Every relative derivative is repeated with 0.1 %, 1 % and 10 % steps (`phase7_step_size_check.csv`).
+- Justification: The outputs are only piecewise smooth (integer argmin, medians). A step much larger than 1 % crosses jumps; a step much smaller than 0.1 % would only amplify round-off.
+- Source / evidence:
+  - Derivatives with respect to pit loss are identical at all three steps (+1, +2, −1).
+  - Derivatives with respect to the wear rates agree at 0.1 % and 1 %; small changes appear only at 10 %.
+  - **Derivatives with respect to k_fuel differ by about 3 % between 0.1 % and 1 %, and badly at 10 %** (one-stop time 1149 / 1158 / 745) — see C8. They are reported as indicative only.
+- How it is validated: `test_central_difference_error_is_second_order`, `test_step_size_check_detects_a_kink`.
+- **Decided by AI without prior approval (Phase 7), to be reviewed by me.**
+
+## D69: Outputs analysed, and the integer pit lap
+- Phase / date: Phase 7 / 2026-10-24
+- Options considered: differentiate the integer pit lap; use the continuous optimum; OAT only.
+- Decision:
+  - **Derivatives are taken of smooth outputs only:**
+    - L* (the continuous, UNCONSTRAINED optimum, C3 first; computed with the stint limits relaxed, C7);
+    - the best one-stop time;
+    - the best two-stop time;
+    - **the margin** (one-stop minus two-stop time; > 0 means two stops are faster). This is the decision-relevant output.
+  - **The integer pit lap appears only in the OAT ranges.**
+- Justification: A finite difference of an integer is 0 or a jump. L* is smooth: its derivative agrees across steps (99.90 / 99.91 / 100.55 for k_fuel).
+- Source / evidence: `phase7_tornado_pit_lap.csv`: the integer pit lap stays at 35–36 in almost every variation because the C4 stint limit pins it (C9).
+- How it is validated: `test_linear_degradation_integral_and_optimum_sensitivity` (dL*/da1 matches the analytic derivative to 1e-4).
+- **Decided by AI without prior approval (Phase 7), to be reviewed by me.**
+
+## D70: Dimensionless coefficients
+- Phase / date: Phase 7 / 2026-10-24
+- Options considered: elasticity for every output; the absolute derivative only.
+- Decision:
+  - Report the **elasticity (dy/dx)·x/y** for L* and the race times.
+  - Report **only the derivative** for the margin, since its nominal value of 4.3 s is close to 0 and changes sign, so a relative change is meaningless.
+  - The delta's elasticity is reported but should be read with care (nominal −0.08 s).
+- Justification: Race-time elasticities are tiny (at most 0.009) because the total is about 5900 s. The absolute derivatives [s per unit] are more informative for them.
+- Source / evidence: `phase7_sensitivity_coefficients.csv`.
+
+  | Input | Elasticity of L* |
+  |---|---|
+  | C3 rate | −0.53 |
+  | C4 rate | +0.55 |
+  | k_fuel | +0.14 |
+  | pit loss | 0 |
+
+  **Exact checks:**
+  - d(one-stop time)/d(C3 rate) = 630 = 35·36/2, the sum of tyre ages over the 35-lap stint (the optimal laps do not move locally);
+  - d(two-stop)/d(C3 rate) = 231 = 21·22/2;
+  - d(margin)/d(pit loss) = −1.
+- How it is validated: `test_coefficient_matches_exact_derivative`, `test_known_elasticities`, `test_margin_against_pit_loss_has_slope_minus_one`.
+- **Decided by AI without prior approval (Phase 7), to be reviewed by me.**
+
+## D71: Race used
+- Phase / date: Phase 7 / 2026-10-24
+- Options considered: n/a.
+- Decision: the Phase 6 setup: Hungarian GP, 70 laps, typical car, models refitted on 2023–2025 (D56–D63).
+- Justification: The sensitivity must be of the result actually reported.
+- Source / evidence: nominal outputs equal Phase 6.
+- How it is validated: n/a.
+- **Decided by AI without prior approval (Phase 7), to be reviewed by me.**
+
+## D72: How the fuel coefficient changes the fitted wear rate
+- Phase / date: Phase 7 / 2026-10-24
+- Options considered: n/a (an analysis requested by the brief).
+- Decision: refit both compounds for k_fuel = 0, 0.005, …, 0.080 (`phase7_fuel_vs_rate.csv/.png`).
+- Justification and finding: **d(rate)/d(k_fuel) = 1.000000 exactly, for both compounds.**
+  - Within a stint, lap number = tyre age + a constant. Changing k by dk therefore adds dk·age + a constant to every lap.
+  - The constant goes into the stint offset, and the degradation slope rises by exactly dk.
+  - **With per-stint offsets (D39), the data cannot separate fuel burn from tyre wear. The wear rate is only as good as k_fuel.**
+  - k_fuel itself was identified in D22 using driver-race offsets, across pit stops, which is the only place the two effects separate.
+- Source / evidence: slope 1.000000000 for both compounds. Over the D22 range 0.015–0.070, the C3 rate moves from 0.029 to 0.084 s/lap.
+- How it is validated: `test_fitted_rate_rises_one_for_one_with_fuel_coefficient` (exact on synthetic data).
+- **Decided by AI without prior approval (Phase 7), to be reviewed by me.**
+
+## D73: Break-even values
+- Phase / date: Phase 7 / 2026-10-24
+- Options considered: n/a.
+- Decision: find where margin = 0 (one stop and two stops equal) for k_fuel and for pit loss, with my bisection (xtol 1e-5).
+- Justification: Tells directly whether an input's plausible range can flip the decision.
+- Source / evidence: `phase7_break_even.csv`.
+
+  | Input | Break-even | Nominal | Plausible range | Can it flip the decision? |
+  |---|---|---|---|---|
+  | **k_fuel** | **0.0333 s/lap** (12 iterations) | 0.046 | 0.015–0.070 | **Yes**: break-even is inside the range |
+  | **Pit loss** | **25.22 s** | 20.89 s | IQR 19.82–22.31 s | **No**: break-even is outside the IQR. Matches 20.89 + 4.33 because d(margin)/dP = −1 |
+
+  In rule-of-thumb units, the k_fuel break-even is 0.0333 / 1.57 ≈ 0.021 s/kg, inside the published 0.01–0.045 s/kg range.
+- How it is validated: the pit-loss break-even agrees with the analytic value to 1e-3.
+- **Decided by AI without prior approval (Phase 7), to be reviewed by me.**
+
+## Phase 7 result: is "two stops" robust?
+One-at-a-time margins (one-stop minus two-stop) [s], from `phase7_oat.csv`, nominal **+4.33 s**:
+
+| Input (range) | Margin low … high | Decision flips? |
+|---|---|---|
+| **k_fuel** (0.015 … 0.070) | **−6.28 … +13.01** | **Yes** (one stop below 0.0333) |
+| **Year-to-year wear** (2025 … 2024) | **−1.27 … +10.49** | **Yes** (in a 2025-like low-wear year, one stop wins) |
+| C3 rate (±2 SE) | +0.83 … +8.29 | no |
+| Compound delta (−0.315 … +0.154 s) | +3.70 … +7.90 | no |
+| Pit loss (IQR) | +2.91 … +5.40 | no |
+| Model (polynomial degree 2, ODE, KNN) | +2.33 … +4.33 | no |
+| C4 rate (±2 SE) | +4.33 … +4.73 | no |
+| Stint-limit rule (≥ 3 / ≥ 10 laps) | +4.07 / one stop infeasible | no (≥ 10 makes a one-stop impossible, C7) |
+
+**Conclusion:** two stops is the better strategy for most inputs. **But the decision rests on the fuel coefficient (equivalently, on how fast the tyres wear that year).** The fuel coefficient is the least certain assumption, and both it and year-to-year wear can reverse the ranking within their plausible ranges.
+- **Model choice:** KNN's two-stop advantage is the smallest (+2.3 s), and the C4 rate barely matters. OI-6 is therefore not decisive.
+- **Integer pit lap:** stays at 35–36 because the stint limit pins it (C9); the unconstrained L* ranges from 28.2 to 36.0 laps.
+
+---
+
 # Open issues (need my decision)
 
-## OI-7: Degradation changes from year to year (found by the final test) — PARTLY RESOLVED by D56–D58 (Phase 6); (d) the per-year scenarios remain for Phase 7
+## OI-7: Degradation changes from year to year (found by the final test) — RESOLVED: D56–D58 (Phase 6); (d) year scenarios in D67 (Phase 7) — the year effect can flip the strategy
 The test race degraded less than every training race (above). Also, the same
 compound behaves differently depending on its label/role: C4 used as the
 SOFT (2022) wore about twice as fast as C4 used as the MEDIUM (2023–2024),
@@ -1136,7 +1273,7 @@ the year-to-year spread of the rate into the Phase 7 sensitivity analysis.
 - Keep the Phase 5 test result as the reported accuracy; label any 2025 strategy numbers as in-sample.
 - In Phase 7, use the per-year rates as low/middle/high wear scenarios.
 
-## OI-6: The linear C4 model over-predicts degradation on old tyres (Phase 5 residuals) — points 1–2 done in Phase 6 (D56, D63); point 3 → KNN comparison in Phase 7 (C5)
+## OI-6: The linear C4 model over-predicts degradation on old tyres (Phase 5 residuals) — RESOLVED: points 1–2 in Phase 6 (D56, D63); point 3 in Phase 7 (D67): with KNN the margin is +2.3 s (two stops still best), and the C4 rate barely matters
 CV residuals of the selected C4 model (polynomial degree 1) are about +0.6 to
 +1.3 s beyond about 25 laps of tyre age: the data level off at about 2.2 s while
 the line keeps rising. This may be partly selection (only drivers managing their

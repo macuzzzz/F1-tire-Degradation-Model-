@@ -39,6 +39,7 @@ def valid_raw_config():
         "models": copy.deepcopy(PROJECT_RAW["models"]),
         "validation": copy.deepcopy(PROJECT_RAW["validation"]),
         "strategy": {**copy.deepcopy(PROJECT_RAW["strategy"]), "data_years": [2023]},
+        "sensitivity": copy.deepcopy(PROJECT_RAW["sensitivity"]),
     }
 
 
@@ -238,6 +239,34 @@ def test_strategy_section_values():
 def test_invalid_strategy_values_are_rejected(key, value, error):
     raw = valid_raw_config()
     raw["strategy"][key] = value
+    with pytest.raises(error):
+        config_from_dict(raw)
+
+
+def test_sensitivity_section_values():
+    from tyredeg.sensitivity import DEFAULT_RELATIVE_STEP
+
+    sensitivity = load_config(REPO_ROOT / "config.yaml").sensitivity
+    assert sensitivity.rate_se_multiples == (-2, -1, 1, 2)
+    assert sensitivity.relative_step == DEFAULT_RELATIVE_STEP == 0.01  # code default mirrors config
+    assert sensitivity.delta_absolute_step == 0.01
+    assert sensitivity.check_relative_steps == (0.001, 0.01, 0.1)
+    assert sensitivity.alternative_min_laps == (3, 10)
+
+
+@pytest.mark.parametrize(
+    "key, value, error",
+    [
+        ("rate_se_multiples", [0, 1], ValueError),
+        ("rate_se_multiples", [], TypeError),
+        ("relative_step", 0.0, ValueError),
+        ("check_relative_steps", [0.01, -0.1], ValueError),
+        ("alternative_min_laps", [0], ValueError),
+    ],
+)
+def test_invalid_sensitivity_values_are_rejected(key, value, error):
+    raw = valid_raw_config()
+    raw["sensitivity"][key] = value
     with pytest.raises(error):
         config_from_dict(raw)
 
