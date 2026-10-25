@@ -292,7 +292,7 @@ throughout the project (October 2026).
   scikit-learn, `numpy.linalg.lstsq` or an analytic solution.
 - The models were selected by leave-one-race-out cross-validation and then
   tested once on a withheld race (2025), protected by a test firewall (D55).
-- The test suite runs offline: 939 tests and doctests.
+- The test suite runs offline: 940 tests and doctests.
 - A reproducibility check compares the SHA-256 hash of every result file
   between runs (D83).
 

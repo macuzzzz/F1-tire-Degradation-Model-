@@ -75,12 +75,18 @@ NOT_HASHED_PREFIXES = ("pipeline_manifest", "pipeline.log", "test_runs.log", "ph
 logger = logging.getLogger("pipeline")
 
 
+# Text files are hashed with Windows line endings (CRLF) turned into LF: git on
+# Windows checks text files out with CRLF, so a fresh clone would otherwise give
+# different hashes for identical content (found in the fresh-clone test, C24).
+TEXT_SUFFIXES = (".csv", ".json", ".yaml", ".yml", ".txt", ".log", ".md", ".html")
+
+
 def sha256(path):
-    digest = hashlib.sha256()
-    with open(path, "rb") as file:
-        for block in iter(lambda: file.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    """SHA-256 of a file's content; line endings do not count for text files."""
+    data = Path(path).read_bytes()
+    if Path(path).suffix.lower() in TEXT_SUFFIXES:
+        data = data.replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest()
 
 
 def result_hashes():

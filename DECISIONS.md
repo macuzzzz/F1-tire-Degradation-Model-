@@ -1583,6 +1583,7 @@ committed selection (11:40:30 UTC, commit 7f7d6eb) is unchanged.
 - Decision: **(c)**. Phase 9 is committed on `main` like the earlier phases. The final submitted state gets an annotated tag (e.g. `v1.0-submission`), so the assessed version can be named exactly.
   - Commit and tag only on my instruction.
   - The local-path leak in the history of commit c01bd56 (C17) can only be removed by rewriting history. That is my decision; the repository has not been pushed.
+  - **Update:** rewritten before publishing; see D92.
 - Justification: one developer and a linear history, so branches add no safety. A tag names the assessed version without moving files.
 - How it is validated: `git status` is clean after the commit; `git ls-files` contains no `cache/` files.
 - **Decided by AI without prior approval (Phase 9), to be reviewed by me.**
@@ -1660,6 +1661,24 @@ Requested after Phase 9 ("fix technical credibility"). As in Phases 6–9, the d
 - **Decided by AI without prior approval (final review), to be reviewed by me.**
 
 ---
+
+## D92: Publishing on GitHub (public) and the history rewrite
+- Phase / date: final review / 2026-10-25
+- Options considered:
+  - visibility: (a) a private repository; (b) a public one;
+  - history: (c) push it as it is; (d) rewrite it first to remove the local paths (C17).
+- Decision: **(b) public and (d) rewrite** (my choice; the AI recommended private).
+  - `git filter-branch` on `c01bd56^..main` replaced the absolute prefix in `reports/phase8_profile_{before,after}.csv` by the repository-relative path, the same form that later commits already used.
+  - Commit hashes from the Phase 8 commit onward changed: c01bd56 → **84258af** (Phase 8), 52fff0f → d2aa457 (Phase 9), f4adbe3 → 4aebab9, c5b12a3 → e1f86c8. Earlier commits are unchanged, including the frozen selection 7f7d6eb and the test commit b85fea3 that audit check B4 uses.
+  - The old history is kept only in a local branch `backup/pre-rewrite`, which is not pushed.
+  - Only `main` is pushed, so the old commits are never uploaded.
+- Justification: a public repository exposes its whole history, and the user name in file paths is personal information with no technical value. The rewrite changes 4 lines in one commit.
+- Source / evidence:
+  - after the rewrite, no commit on `main` contains the user name (`git grep` over `git rev-list main`);
+  - the newest tree is byte-identical to the one before the rewrite.
+- Note: the author e-mail (student address) is in every commit and stays public.
+- How it is validated: the fresh-clone test (C24) and the search above.
+- **Decided by me (visibility and rewrite); carried out by the AI.**
 
 # Open issues (need my decision)
 

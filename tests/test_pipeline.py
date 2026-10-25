@@ -64,3 +64,12 @@ def test_selections_agree_compares_selected_model_and_family_winners():
     assert not compare_models.selections_agree(frozen, other_model)
     assert not compare_models.selections_agree(frozen, other_knn)
     assert not compare_models.selections_agree(frozen, unknown_compound)
+
+
+def test_hash_ignores_line_endings_of_text_files_only(tmp_path):
+    (tmp_path / "lf.csv").write_bytes(b"a,b\n1,2\n")
+    (tmp_path / "crlf.csv").write_bytes(b"a,b\r\n1,2\r\n")
+    (tmp_path / "lf.png").write_bytes(b"a\nb")
+    (tmp_path / "crlf.png").write_bytes(b"a\r\nb")
+    assert run_pipeline.sha256(tmp_path / "lf.csv") == run_pipeline.sha256(tmp_path / "crlf.csv")
+    assert run_pipeline.sha256(tmp_path / "lf.png") != run_pipeline.sha256(tmp_path / "crlf.png")

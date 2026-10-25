@@ -218,7 +218,7 @@ are recorded in DECISIONS.md and the phase summaries.
 
 ## C17: Local file paths (with my user name) leaked into committed profile reports
 - Phase / date: Phase 9 / 2026-10-24
-- What happened: `reports/phase8_profile_before.csv` and `phase8_profile_after.csv`, committed in Phase 8 (c01bd56), contained absolute paths such as `C:/Users/<me>/Documents/.../scripts/benchmark.py`, exposing the local user name and folder layout. The first `reports/pipeline.log` also contained them (FastF1 cache path).
+- What happened: `reports/phase8_profile_before.csv` and `phase8_profile_after.csv`, committed in Phase 8 (commit c01bd56, now 84258af after the history rewrite), contained absolute paths such as `C:/Users/<me>/Documents/.../scripts/benchmark.py`, exposing the local user name and folder layout. The first `reports/pipeline.log` also contained them (FastF1 cache path).
 - How it was detected: an automated security review of the Phase 8 commit flagged `profile_function` in `performance.py`; a search of `reports/` then found the paths in both profile CSVs and in the new pipeline log.
 - Root cause: `profile_function` shortened paths only for installed libraries (`site-packages/`) and `src/`; files elsewhere (the benchmark script itself) kept their absolute path. The logger writes absolute cache paths, which is harmless on screen but not in a committed file.
 - What was tried / resolution:
@@ -227,7 +227,7 @@ are recorded in DECISIONS.md and the phase summaries.
   3. Added `reports/pipeline.log` to `.gitignore` (run-specific).
 
   Verified: no local paths remain in `reports/`.
-- Impact on results / lesson learned: no numerical results changed. **The old paths remain in the git history of commit c01bd56**; removing them would require rewriting history, which is destructive and is left to my decision (the repository has not been pushed anywhere). Check generated artefacts for machine-specific information before committing them.
+- Impact on results / lesson learned: no numerical results changed. **Update 2026-10-25: the history was rewritten (my decision, before publishing on GitHub, D92)**, so no commit contains the paths any more. Before that: the old paths remained in the git history of commit c01bd56; removing them required rewriting history, which is destructive and is left to my decision (the repository has not been pushed anywhere). Check generated artefacts for machine-specific information before committing them.
 
 ## C18: Pipeline output differed from the committed Phase 5 CSVs in the last digit
 - Phase / date: Phase 9 / 2026-10-24
@@ -287,3 +287,12 @@ are recorded in DECISIONS.md and the phase summaries.
 - What was tried: checked whether this is leakage. It is not: the strategy is never scored against the test race, and the test evaluation used no pit loss. Audit check B9 records this.
 - Resolution: resolved; the docstring now states both cases and points to D56/D58.
 - Impact on results / lesson learned: none on results. When a decision changes, search the code and docs for statements of the old rule, not only the config.
+
+## C24: The reproducibility check was silently skipped in a fresh Windows clone
+- Phase / date: final review / 2026-10-25
+- What happened: in the fresh-clone test, the pipeline ran correctly and every result matched the committed files, but it did not log its reproducibility check.
+- How it was detected: the "Reproducibility check" line was missing from the fresh-clone log.
+- Root cause: git on Windows (`core.autocrlf = true`) checks text files out with CRLF line endings. The SHA-256 of `config.yaml` therefore differed from the hash in the committed manifest (written from LF files), so the pipeline treated it as a different config and skipped the comparison. Result CSVs would also have hashed differently.
+- What was tried: `sha256` in `run_pipeline.py` now turns CRLF into LF for text files (csv, json, yaml, txt, log, md, html) before hashing. Binary files such as PNGs are hashed unchanged.
+- Resolution: resolved; test `test_hash_ignores_line_endings_of_text_files_only`. The fresh-clone test was repeated after the change (D92).
+- Impact on results / lesson learned: none on results; `git status` in the clone had already shown every result file unchanged. A reproducibility check must be tested on a fresh checkout on another configuration, not only on the machine that wrote the reference.
