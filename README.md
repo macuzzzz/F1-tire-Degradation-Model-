@@ -19,7 +19,7 @@ of the pits include the pit-lane time. The project:
 4. builds a race-time model and finds the pit lap(s) that minimise total race
    time, then tests how sensitive that answer is to the inputs.
 
-Scope (decisions D4, D6, D52, D56 in [DECISIONS.md](DECISIONS.md)): Hungarian
+Scope: Hungarian
 Grand Prix, all teams, Pirelli compounds C3 and C4, seasons 2022–2025. Car
 performance (downforce, top speed, set-up) is not modelled; a separate base
 lap time per stint absorbs car and driver pace (D39).
@@ -83,7 +83,7 @@ Headline results (from the files above, current config):
   0.0597 s/lap, C4 0.0551 s/lap (2023–2025 refit).
 - Test on 2025: RMSE 0.94 s (C3) and 1.04 s (C4), lower than the no-degradation
   baseline, but with a positive bias (+0.28 and +0.54 s/lap). The bias criterion
-  of 0.10 s/lap was not met (DECISIONS.md, Phase 5 test record).
+  of 0.10 s/lap was not met.
   - **Main cause:** the 2025 wear rate was 30–36 % lower than in the training
     years.
   - **Second cause, C4 only:** the first laps of 2025 stints were slow, and they
@@ -243,18 +243,8 @@ notebooks/             exploration only (currently empty; all logic is in src/)
   `reports/phase9_api_review.csv`), but the checks cover types, shapes and
   ranges, not whether the data make physical sense.
 
-The full list of challenges met during the project is in
-[CHALLENGES.md](CHALLENGES.md), and the lessons are summarised in
-[LESSONS_SUMMARY.md](LESSONS_SUMMARY.md).
-
-## Decisions, challenges and lessons
-
-- [DECISIONS.md](DECISIONS.md): every technical decision, with the options
-  considered, the justification, the evidence and how it is validated.
-- [CHALLENGES.md](CHALLENGES.md): problems met during the project, how they were
-  found and how they were resolved.
-- [LESSONS_SUMMARY.md](LESSONS_SUMMARY.md): the most important challenges,
-  lessons and limitations in one page.
+The challenges met during the project, how they were resolved and the lessons
+drawn from them are discussed in the project report (submitted separately).
 
 ## Use of AI
 
@@ -267,10 +257,10 @@ Opus 5.5, used for the whole project.
   validation, strategy, sensitivity and performance code, the scripts and the
   940 tests.
 - **Analyses:** the AI ran every analysis that produced the numbers in `reports/`.
-- **Writing:** the AI drafted DECISIONS.md, CHALLENGES.md, LESSONS_SUMMARY.md,
-  this README and the report.
-- **My part:** the project specification and the working rules it had to follow
-  (CLAUDE.md), every Phase 1–5 decision, the questions that changed the
+- **Writing:** the AI drafted the working documentation (a decision log, a
+  challenge log and a lessons summary), this README and the report.
+- **My part:** the project specification and the working rules it had to follow,
+  every Phase 1–5 decision, the questions that changed the
   analysis, and the review of each phase before committing it.
 
 **Why AI was used this way.** The project requires every numerical method to be
@@ -280,9 +270,9 @@ decision protocol. For each phase the AI had to list every decision with 2–3
 options, a recommendation, the evidence and how it would be validated, and then
 **stop until I approved or changed it** (Phases 1–5). For Phases 6–9 I let the AI
 decide and implement directly, under the rule that every such decision is marked
-"Decided by AI without prior approval, to be reviewed by me" in DECISIONS.md.
+"Decided by AI without prior approval, to be reviewed by me" in the decision log.
 
-**Decisions that remained mine** (recorded in DECISIONS.md):
+**Decisions that remained mine:**
 - **Scope:**
   - I asked for data surveys of every track and every Pirelli compound before
     choosing.
@@ -321,7 +311,7 @@ decide and implement directly, under the rule that every such decision is marked
   anything I could not yet defend, such as the interquartile range (IQR) and the
   purpose of a validation test.
 
-**Errors and limitations of the AI** (all logged in CHALLENGES.md):
+**Errors and limitations of the AI** (each was caught and fixed during the project):
 - It wrote doctest examples and expected values without running them, and some
   failed (C3, C11).
 - A verification re-run it started overwrote the frozen model selection after
@@ -346,8 +336,7 @@ decide and implement directly, under the rule that every such decision is marked
   output. A test written from an expected value nobody computed proves nothing.
 - Every generated file has to be checked before it is published.
 - Because I must explain this work without AI in the oral examination, I
-  treated every decision in DECISIONS.md as something I need to be able to
-  defend myself.
+  treated every decision as something I need to be able to defend myself.
 
 ## Licence
 
