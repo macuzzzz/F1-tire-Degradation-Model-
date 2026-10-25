@@ -336,17 +336,28 @@ def bench_profile(perf, config, names):
     return table
 
 
-def main():
+def main(config=None, sections=None, output_dir=None):
+    """Run the benchmarks.
+
+    ``sections`` defaults to the command-line arguments (or all sections);
+    ``output_dir`` replaces reports/ so that a pipeline run does not overwrite
+    the committed Phase 8 evidence (D80) with this machine's timings.
+    """
+    global REPORTS, FIGURES
     logging.getLogger("fastf1").setLevel(logging.ERROR)
-    config = load_config(REPO_ROOT / "config.yaml")
+    if config is None:
+        config = load_config(REPO_ROOT / "config.yaml")
+    if output_dir is not None:
+        REPORTS = Path(output_dir)
+        FIGURES = REPORTS / "figures"
     perf = config.performance
-    REPORTS.mkdir(exist_ok=True)
-    FIGURES.mkdir(exist_ok=True)
+    FIGURES.mkdir(parents=True, exist_ok=True)
     info = machine_info()
     (REPORTS / "phase8_machine.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
     print("Machine:", info)
 
-    sections = sys.argv[1:] or ["ode", "knn", "least_squares", "strategy", "profile"]
+    if sections is None:
+        sections = sys.argv[1:] or ["ode", "knn", "least_squares", "strategy", "profile"]
     from tyredeg.validation import load_selection
     selection = load_selection(REPO_ROOT / config.validation.selection_file)["selection"]
     names = {c: selection[c]["selected"] for c in config.strategy.compounds}

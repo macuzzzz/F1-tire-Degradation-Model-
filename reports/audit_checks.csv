@@ -1,0 +1,20 @@
+check,status,detail
+A1 C3: test result reproduced,passed,"RMSE 0.9418 s, bias +0.2760 s/lap (reported 0.9418, +0.2760)"
+A2 C3: bias explained by the lower 2025 wear rate,info,"rate 0.0705 (train) vs 0.0451 s/lap (2025); expected bias +0.416 of the observed +0.276 s/lap (rest -0.140 from the anchor laps, which sat -0.147 s from the 2025 curve); 19 laps beyond the training age 41; bias within training ages +0.268 s/lap"
+A1 C4: test result reproduced,passed,"RMSE 1.0421 s, bias +0.5359 s/lap (reported 1.0421, +0.5359)"
+A2 C4: bias explained by the lower 2025 wear rate,info,"rate 0.0713 (train) vs 0.0496 s/lap (2025); expected bias +0.297 of the observed +0.536 s/lap (rest +0.239 from the anchor laps, which sat +0.217 s from the 2025 curve); 0 laps beyond the training age 42; bias within training ages +0.536 s/lap"
+A3 leftover fuel effect on the 2025 race,info,"-0.0027 s/lap, 95% CI [-0.0074, +0.0028] (0 = the fuel correction fits 2025 too)"
+A4 bias by team,info,"14 of 20 team/compound groups have a positive bias (a common cause, not one car)"
+B1 train and test races are disjoint,passed,"train [2022, 2023, 2024], test [2025]"
+B2 selection was fitted without the test race,passed,"training races: ['2022 Hungarian Grand Prix', '2023 Hungarian Grand Prix', '2024 Hungarian Grand Prix']"
+B3 selection frozen before the first test run,passed,"selection 2026-10-24T11:40:30+00:00, first test run 2026-10-24T11:40:44+00:00, 1 test run(s) logged"
+B4 selection committed before the test results (git history),passed,selection commit 7f7d6eb is an ancestor of b85fea3
+B5 cleaning and fuel correction are per race,passed,each race prepared alone gives the same clean laps and times as all races together
+B6 CV data and folds exclude the test race,passed,"3 folds over ['2022_hungarian_grand_prix', '2023_hungarian_grand_prix', '2024_hungarian_grand_prix']"
+B7 anchor laps are never scored,passed,"1730 scored laps, 261 anchor laps, overlap 0"
+B8 k_fuel consistent with the training races alone,passed,"leftover +0.0008 s/lap, 95% CI [-0.0031, +0.0042]: training data imply k_fuel = 0.0452 (config 0.046)"
+"B9 strategy refit includes 2025 (by design, after the test)",info,"D56/D58: the strategy models and pit loss use 2023-2025; the strategy is never scored against the test race, so this is not validation leakage"
+C1 every ranked strategy obeys the rules,passed,"8 strategies: 70 laps, >= 2 compounds, stint limits {'C3': 40, 'C4': 35}, pit loss 20.89 s per stop, times recomputed lap by lap within 1e-06 s"
+C2 exhaustive search confirms the best 1-stop,passed,"C3 -> C4 stints [35, 35]: 5930.828 s (reported 5930.828 s)"
+C3 exhaustive search confirms the best 2-stop,passed,"C3 -> C4 -> C4 stints [21, 24, 25]: 5926.499 s (reported 5926.499 s)"
+C4 three stops are not faster (outside the modelled strategies),passed,"best 3-stop C3 -> C4 -> C4 -> C4 stints [16, 18, 18, 18]: 5935.141 s vs best 5926.499 s"

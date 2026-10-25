@@ -28,7 +28,7 @@ CHALLENGES.md was started in Phase 6.
 
 | # | What happened | Consequence | Reference |
 |---|---|---|---|
-| 8 | On the 2025 test race, both selected models were biased (+0.28 s/lap C3, +0.54 s/lap C4) and failed the 0.10 s/lap criterion. 2025 wear was lower than in every training year (C3: 0.045 s/lap against 0.063–0.075), and 2025 C3 stints reached tyre age 55 laps against a training maximum of 41. | The year-to-year change is the dominant uncertainty. The strategy models were refitted on 2023–2025, and the year effect was added to the sensitivity analysis, where it can flip the strategy. | Phase 5 test record, OI-7, D56, D67 |
+| 8 | On the 2025 test race, both selected models were biased (+0.28 s/lap C3, +0.54 s/lap C4) and failed the 0.10 s/lap criterion. 2025 wear was lower than in every training year (C3: 0.045 s/lap against 0.063–0.075), and 2025 C3 stints reached tyre age 55 laps against a training maximum of 41. | The year-to-year change is the dominant uncertainty. The strategy models were refitted on 2023–2025, and the year effect was added to the sensitivity analysis, where it can flip the strategy. The final audit split the bias exactly: the lower wear rate gives +0.42 (C3) and +0.30 (C4) s/lap; the anchor laps give −0.14 and +0.24 s/lap (2025 C4 first laps about 0.2 s slow). Extrapolation, the fuel correction and any single team were ruled out. | Phase 5 test record, OI-7, D56, D67, D89 |
 | 9 | Compound pace cannot be read from per-compound models, because per-stint offsets absorb it. The paired estimate is confounded with stint order (35 of 43 driver-races ran C4 first). | An order-balanced delta was used (−0.080 s, plausible range −0.32 to +0.15 s). It is the least certain strategy input. | C1, C2, D60 |
 | 10 | The one-stop optimum is pinned to the data-coverage stint limit (C4 ≤ 35 laps). With a stricter rule (≥ 10 laps per tyre age) no one-stop race is feasible at all. | The recommended pit lap is set more by the data-coverage rule than by the degradation physics. | C5, C7, C9, D63 |
 | 11 | The race-time curve is flat: several strategies tie, and the 4.33 s two-stop advantage is smaller than the pit-loss uncertainty (IQR 19.8–22.3 s) times the number of stops. | The break-even values are reported: `k_fuel` 0.0333 s/lap (inside its range) and pit loss 25.22 s. | C6, D73 |
@@ -52,7 +52,8 @@ CHALLENGES.md was started in Phase 6.
    SOFT/MEDIUM/HARD (#2); the resolved event name, not the requested one (#3).
 3. **A test set must be protected by code, not by intention.** The firewall had
    a gap until it guarded every frozen artefact (#12).
-4. **Cross-validation within past years does not measure year-to-year change.**
+4. **Cross-validation within past years does not measure year-to-year change,
+   and a bias should be decomposed before it is explained** (D89).
    The CV error (RMSE 0.63 / 0.85 s) understated the test error (0.94 / 1.04 s),
    because the test year differed from all training years (#8).
 5. **Confounding cannot be fixed by more fitting.** Fuel and track evolution (#4),
@@ -78,7 +79,10 @@ CHALLENGES.md was started in Phase 6.
 - Four races in total: three cross-validation folds and a single test race.
 - On the test race the selected linear models have a positive bias and a
   negative test R² (−0.04 C3, −0.47 C4). They still beat the no-degradation
-  baseline on RMSE.
+  baseline on RMSE. The bias comes mostly from a lower 2025 wear rate, and for C4
+  also from slow anchor laps (D89).
+- Anchoring each stint on its first 3 laps carries any warm-up or traffic
+  effect in those laps into every prediction of the stint.
 - One fuel coefficient for all races, which also contains track evolution; the
   strategy decision flips below 0.0333 s/lap.
 - Not modelled: track temperature, weather, car performance and set-up, driver,

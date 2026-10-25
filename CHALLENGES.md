@@ -278,3 +278,12 @@ are recorded in DECISIONS.md and the phase summaries.
   - Full run: 935 passed, 32 skipped, coverage 95 %.
   - Pipeline: every model, validation, strategy and sensitivity result is byte-identical; only `phase9_api_review.csv` changed.
 - Impact on results / lesson learned: none on results, since the functions are tested. A project rule that is not checked automatically drifts; the review script should have existed from Phase 1.
+
+## C23: A docstring contradicted the strategy decision on which races set the pit loss
+- Phase / date: final review / 2026-10-25
+- What happened: `estimate_pit_loss` said "Pass only training races, so the test race does not influence the value used for strategy optimisation", but since D56/D58 the strategy deliberately estimates the pit loss on 2023–2025, including the 2025 test race.
+- How it was detected: reading the function while writing the leakage audit (D90).
+- Root cause: the docstring was written in Phase 2, before the test, and was not updated when D58 changed the data window after the test.
+- What was tried: checked whether this is leakage. It is not: the strategy is never scored against the test race, and the test evaluation used no pit loss. Audit check B9 records this.
+- Resolution: resolved; the docstring now states both cases and points to D56/D58.
+- Impact on results / lesson learned: none on results. When a decision changes, search the code and docs for statements of the old rule, not only the config.

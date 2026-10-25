@@ -1,24 +1,38 @@
 {
-  "created_utc": "2026-10-24T17:32:07+00:00",
-  "git_commit": "52fff0ff796ab235b2ea1134e6950cfb122a1859",
+  "created_utc": "2026-10-25T01:34:10+00:00",
+  "git_commit": "f4adbe3dd5214678fbe0efd0af8c7c962395a8f8",
   "config": "config.yaml",
   "config_sha256": "82b5ecc98f8558cbbf2290df2d9bf503db1edb0d0f3732101cccbf151fb4d2ee",
   "stages": [
+    "numerics",
     "data",
     "validate",
     "test",
     "strategy",
-    "sensitivity"
+    "sensitivity",
+    "audit"
   ],
   "stage_durations_s": {
-    "data": 6.08,
-    "validate": 7.92,
+    "numerics": 6.21,
+    "data": 2.64,
+    "validate": 4.22,
     "test": 0.0,
-    "strategy": 1.02,
-    "sensitivity": 14.84
+    "strategy": 0.7,
+    "sensitivity": 8.41,
+    "audit": 4.79
   },
   "results_sha256": {
+    "audit_2025_bias_by_age.csv": "598d38c8f522f96cf2080f47e0480fabd30c1cbedb663d1c05766a89f9189361",
+    "audit_2025_bias_by_team.csv": "e8a2d34581b6a9aa204abd9fdbe8134117c2fcc5b1afdea7dcce8a52c9bbb44c",
+    "audit_2025_summary.csv": "bee402a5feb9e90f6b9f74c2408a128eb086e682258ca4a50983c04f754ceedb",
+    "audit_checks.csv": "6c12bcaf497e2e34eead16220e1ee85f8a7dc8940339dc7bf5e7b9fe0104dfb7",
     "figures/.gitkeep": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "figures/audit_2025_bias_by_age.png": "30476b3c5462bfa3f538b1c1265d2cd71ab053fb25b096110eab0b54ca3c5856",
+    "figures/audit_2025_degradation_train_vs_test.png": "c545c8cd2cee6aa0cf3c50dcbee3adfc8db6553652f49ef33d9cd74f6a4b03d2",
+    "figures/data_cleaning.png": "96f76db969f5e670df42d4fbc8c60a45862f0801bacb0280609540b22c767315",
+    "figures/data_degradation_raw.png": "bbe98d36fd6fea8ebc182d3f0711c3f641e7beb016ca9bc146dbe69c8f4e69b3",
+    "figures/data_fuel_correction.png": "d59b04db78f60d96d608efc6e49ed7233132c74c4215443999ddb0709bf120ed",
+    "figures/data_pit_loss.png": "7d3a0cc030d4147056b8bba9db1bb03572a1c21a42493efba0349a9f3d0017fd",
     "figures/phase3_finite_differences.png": "c963a3a6b42092a27462c094439f0b0229ad836237ca35c278b166b326ed3d6b",
     "figures/phase3_least_squares.png": "472514431f0c9e96c35a9827e15881a169e4e0f06d8505dd2b72db77a1d1cf8a",
     "figures/phase3_ode_fixed_step.png": "8d06d01f0fde81a6541a48d70a1b3d775950c33322f3c67d641aae9db1c9c34c",
@@ -27,6 +41,7 @@
     "figures/phase5_cv_rmse.png": "f77a9b4359854976f8c7914aa39b9a153d3381180ebfba0739d2978d90d1e1a3",
     "figures/phase5_degradation_curves.png": "6297164e741d26a74f7da91e0e317c492d12b4403a273b49bc553ff11356c91e",
     "figures/phase5_residuals.png": "972d521121483b26df5edc198e8732f86eca2a3783ede0b97ae51b1a573a4709",
+    "figures/phase6_degradation_models.png": "7f40645606c31b20d6ac7debc65e528a5aa2281215b5286b852bc1915ff09036",
     "figures/phase6_race_time_vs_pit_lap.png": "08e60dac109d41f33e2d390fc82a58c148550b1a480d8223da6effa78ee26624",
     "figures/phase6_two_stop.png": "a6a173046ac3e102ac9012202a6c7c8157fc7442c3d80e5e8409a6582edcd604",
     "figures/phase7_fuel_vs_rate.png": "455a3ed2766403430e211a9890a4d5f6aabb4052bf58ac3587f637bf048ff59d",

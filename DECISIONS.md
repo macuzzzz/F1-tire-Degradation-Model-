@@ -1589,6 +1589,78 @@ committed selection (11:40:30 UTC, commit 7f7d6eb) is unchanged.
 
 ---
 
+# Final review: credibility audit and figures
+
+Requested after Phase 9 ("fix technical credibility"). As in Phases 6–9, the decisions below were made by the AI and implemented straight away; **each is to be reviewed by me.** Evidence: `reports/audit_*`.
+
+## D89: Diagnosis of the 2025 test bias (descriptive, after the test)
+- Phase / date: final review / 2026-10-25
+- Options considered:
+  - (a) report the test metrics only;
+  - (b) a post-test diagnosis that changes nothing: the residuals are split by tyre age and team, and the bias is split exactly into a wear-rate part and an anchor-lap part.
+- Decision: **(b)**, in `scripts/audit.py` (part A). The frozen selection and the reported test result are not changed. The test is not re-run: the script recomputes the predictions and checks that they equal the reported ones (check A1).
+- Method: each prediction is anchored on its stint's first 3 laps (D49), so the mean error splits exactly into two parts:
+  - **wear-rate part:** mean over scored laps of [d_train(age) − d_train(anchor)] − [d_2025(age) − d_2025(anchor)], where d_2025 is the same model form fitted on the 2025 race;
+  - **anchor part:** the rest, caused by the anchor laps sitting above or below the 2025 curve.
+- Source / evidence (`reports/audit_2025_*.csv`, figures `audit_2025_*.png`):
+
+  | | C3 | C4 |
+  |---|---|---|
+  | Wear rate, training → 2025 [s/lap] | 0.0705 → 0.0451 (−36 %) | 0.0713 → 0.0496 (−30 %) |
+  | Observed bias [s/lap] | +0.276 | +0.536 |
+  | Wear-rate part | +0.416 | +0.297 |
+  | Anchor part (anchor laps vs the 2025 curve) | −0.140 (−0.147 s) | +0.239 (+0.217 s) |
+  | Bias within training tyre ages | +0.268 (19 laps beyond 41) | +0.536 (none beyond) |
+
+  - Bias by tyre age: for C3 it rises from +0.01 s (ages 0–10) to +1.02 s (30–41), the signature of a slope that is too steep. For C4 it is already +0.40 s at ages 0–10, which is the anchor effect.
+  - Leftover fuel effect on 2025 alone: −0.0027 s/lap, 95 % CI [−0.0074, +0.0028], so the fuel correction is not the cause.
+  - 14 of the 20 team/compound groups have a positive bias, so the cause is common to the field, not one car.
+- Conclusion:
+  - The main cause is that **the 2025 wear rate was 30–36 % lower** than in 2022–24. The 2025 C3 was softened (D4 caveats) and the track was colder (32 °C against 45–49 °C).
+  - For C4, a second cause is that the first laps of 2025 C4 stints were about 0.2 s slower than the rest of the stint predicts (warm-up or traffic). The anchor rule (D49) carries this into every prediction.
+  - Extrapolation beyond the training ages is **not** the cause.
+- How it is validated: `tests/test_audit.py::test_rate_change_explains_the_whole_bias_without_noise` (a noise-free case in which the wear-rate part equals the whole bias); check A1 confirms the test result is reproduced.
+- **Decided by AI without prior approval (final review), to be reviewed by me.**
+
+## D90: Leakage and strategy-constraint audit
+- Phase / date: final review / 2026-10-25
+- Options considered: (a) rely on the existing unit tests; (b) an audit stage that checks the REAL data and results on every pipeline run and stops the run if a check fails.
+- Decision: **(b)**, in `scripts/audit.py` (parts B and C) and the pipeline's `audit` stage. Results go to `reports/audit_checks.csv`.
+- Leakage checks (all passed):
+  - **B1:** the training and test races are disjoint.
+  - **B2:** the frozen selection lists only the 2022–24 races.
+  - **B3:** the selection (11:40:30 UTC) is older than the only test run (11:40:44 UTC; 1 run logged).
+  - **B4:** in git history, the selection commit 7f7d6eb is an ancestor of the commit that added the test results (b85fea3).
+  - **B5:** cleaning and fuel correction are per race: each race prepared alone equals the same race prepared together with the others.
+  - **B6:** the CV data and folds contain no 2025 laps.
+  - **B7:** the anchor laps are never scored (1,730 scored laps, 261 anchor laps, overlap 0).
+  - **B8:** the training races alone imply k_fuel = 0.0452 (leftover +0.0008, CI includes 0), consistent with 0.046.
+  - **B9 (information):** the strategy refit uses 2025 by decision D56/D58. That happens after the test and is never scored, so it is not leakage. The stale `estimate_pit_loss` docstring that said otherwise was corrected (C23).
+- Strategy checks (all passed):
+  - **C1:** all 8 ranked strategies:
+    - have stints that sum to 70 laps;
+    - use at least two compounds;
+    - respect the stint limits (C3 40, C4 35);
+    - have pit laps consistent with their stints;
+    - have times that match an independent stint-by-stint sum within 1e-6 s (pit loss 20.89 s per stop, fuel effect as D62).
+  - **C2, C3:** an independent exhaustive search over every stint-length combination finds the same best one-stop (5930.828 s) and two-stop (5926.499 s).
+  - **C4:** the best three-stop race (16+18+18+18 laps, 5935.141 s) is slower, so limiting the search to two stops (D59) does not hide a better strategy.
+- Reproducibility: two consecutive runs gave all 52 result files byte-identical (including every figure), and every committed result file was unchanged after the run.
+- How it is validated: `tests/test_audit.py` checks the exhaustive search against the optimisers and the stint-time table.
+- **Decided by AI without prior approval (final review), to be reviewed by me.**
+
+## D91: One run produces every figure
+- Phase / date: final review / 2026-10-25
+- Options considered: (a) separate scripts per phase; (b) all figures from `run_pipeline.py` by default.
+- Decision: **(b)**. New default stages: `numerics` (the Phase 3 study, including error vs step size with the optimal step), `audit` and `benchmarks`. The `data` stage now also draws the data figures (`scripts/data_figures.py`: cleaning, fuel correction, raw degradation, pit loss), and the strategy stage adds `phase6_degradation_models.png`. The log ends with the list of figures written (24 per run).
+  - **Benchmarks** write to `reports/benchmarks_latest/` (git-ignored), so a run never overwrites the committed Phase 8 evidence (D80) with another machine's timings.
+- Justification: the requested behaviour, "generate all the graphs when I run the program".
+- Source / evidence: full run 1 min 43 s, of which benchmarks 73 s; without benchmarks about 30 s (`--stages` to choose).
+- How it is validated: `tests/test_pipeline.py` (stage order, hash exclusions); the figure list in the log.
+- **Decided by AI without prior approval (final review), to be reviewed by me.**
+
+---
+
 # Open issues (need my decision)
 
 ## OI-7: Degradation changes from year to year (found by the final test) — RESOLVED: D56–D58 (Phase 6); (d) year scenarios in D67 (Phase 7) — the year effect can flip the strategy

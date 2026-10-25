@@ -308,8 +308,10 @@ def _find_green_stops(laps):
 def estimate_pit_loss(laps, clean_laps):
     """Estimate the time lost by a pit stop from real green-flag stops (D24).
 
-    **Pass only training races**, so the test race does not influence the
-    value used for strategy optimisation.
+    Pass only the races that may inform the result: before the test
+    evaluation that means the training races only. The final strategy
+    (after the test) deliberately uses 2023-2025 (D56, D58); it is never
+    scored against the test race, so this is not leakage (audit check B9).
 
     Parameters
     ----------

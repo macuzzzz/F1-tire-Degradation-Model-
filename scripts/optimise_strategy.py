@@ -106,6 +106,35 @@ def plot_race_time(models, total_laps, pit_loss, k_fuel, add_fuel, methods):
     plt.close(fig)
 
 
+def plot_degradation_models(models, clean):
+    """Fitted degradation curve of each strategy compound over the observed data (D56, D63).
+
+    Points: mean of (fuel-corrected lap time - stint offset) per tyre age, ages
+    with at least 5 laps. The dotted line marks the stint limit.
+    """
+    fig, ax = plt.subplots(figsize=(7.5, 4.5))
+    for (compound, cm), colour in zip(sorted(models.items()), ("tab:blue", "tab:orange", "tab:green")):
+        laps = clean[clean["PirelliCompound"] == compound]
+        offsets = laps["StintId"].map(cm.model.stint_offsets()).to_numpy(float)
+        adjusted = laps["FuelCorrectedTime"].to_numpy(float) - offsets
+        table = pd.DataFrame({"age": laps["TyreLife"].to_numpy(float), "d": adjusted})
+        means = table.groupby("age")["d"].agg(["mean", "count"])
+        means = means[means["count"] >= 5]
+        ax.plot(means.index, means["mean"], "o", ms=3, color=colour, alpha=0.6)
+        ages = np.linspace(0, cm.max_stint_laps, 100)
+        ax.plot(ages, cm.model.degradation(ages), color=colour,
+                label=f"{compound} (stint limit {cm.max_stint_laps} laps, dotted)")
+        ax.axvline(cm.max_stint_laps, color=colour, linestyle=":")
+    ax.set_xlabel("tyre age [laps]")
+    ax.set_ylabel("degradation d(age) [s]")
+    ax.set_title("Strategy models: tyre degradation, Hungary 2023-2025")
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(FIGURES / "phase6_degradation_models.png", dpi=150)
+    plt.close(fig)
+
+
 def plot_two_stop(models, total_laps, pit_loss, k_fuel, add_fuel, ranking):
     two = ranking[ranking["stops"] == "2-stop"]
     if two.empty:
@@ -154,6 +183,7 @@ def main(config=None):
     spread.to_csv(REPORTS / "phase6_team_degradation.csv", index=False)
     plot_race_time(models, total_laps, pit_loss, k_fuel, add_fuel, methods)
     plot_two_stop(models, total_laps, pit_loss, k_fuel, add_fuel, ranking)
+    plot_degradation_models(models, clean)
 
     pd.set_option("display.width", 220)
     print(f"Strategy inputs (refit on {list(strategy.data_years)}): {total_laps} laps, pit loss "
