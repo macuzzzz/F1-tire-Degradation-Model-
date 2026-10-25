@@ -258,57 +258,96 @@ The full list of challenges met during the project is in
 
 ## Use of AI
 
-> **DRAFT written by the AI from the project record. To be checked, corrected
-> and reworded by me before submission.** Items in [brackets] are for me to fill in.
+**Tool.** Claude Code (Anthropic), the VS Code extension with the model Claude
+Opus 5.5, used for the whole project.
 
-**Tool.** Claude Code (Anthropic) in VS Code, model Claude Opus 5.5, used
-throughout the project (October 2026).
+**What it was used for, and how much.**
+- **Code: almost all of it.** The AI wrote essentially all of the code in this
+  repository: the from-scratch numerical methods, the data loaders, the models,
+  validation, strategy, sensitivity and performance code, the scripts and the
+  940 tests.
+- **Analyses:** the AI ran every analysis that produced the numbers in `reports/`.
+- **Writing:** the AI drafted DECISIONS.md, CHALLENGES.md, LESSONS_SUMMARY.md,
+  this README and the report.
+- **My part:** the project specification and the working rules it had to follow
+  (CLAUDE.md), every Phase 1–5 decision, the questions that changed the
+  analysis, and the review of each phase before committing it.
 
-**What the AI did.**
-- Proposed the options for every technical decision, with trade-offs and
-  evidence.
-- Wrote all the code: the from-scratch numerical methods, models, validation,
-  strategy, sensitivity, performance code, the scripts and the tests.
-- Ran the analyses that produced every number in `reports/`.
-- Drafted the documentation (DECISIONS.md, CHALLENGES.md, LESSONS_SUMMARY.md
-  and this README).
+**Why AI was used this way.** The project requires every numerical method to be
+written from scratch, tested and documented. That is a large amount of code, so
+I used the AI to implement it. I kept control of the engineering through a
+decision protocol. For each phase the AI had to list every decision with 2–3
+options, a recommendation, the evidence and how it would be validated, and then
+**stop until I approved or changed it** (Phases 1–5). For Phases 6–9 I let the AI
+decide and implement directly, under the rule that every such decision is marked
+"Decided by AI without prior approval, to be reviewed by me" in DECISIONS.md.
 
-**What I decided.**
-- **Phases 1–5 (D1–D55):** the AI listed the options and stopped. I approved
-  each decision or changed it before any code was written. My changes are
-  recorded in DECISIONS.md, for example:
-  - the scope changes (Bahrain/HARD → Hungary/C3, Red Bull only → all teams);
-  - the season range;
-  - asking for a step-size study (N3);
-  - the root-finder stopping rule (D30 amendment).
-- **Phases 6–9 (D56–D88):** I told the AI to decide and implement without
-  asking first. Every one of these decisions is marked "Decided by AI without
-  prior approval, to be reviewed by me". [State which ones I have reviewed,
-  and any I changed.]
-- [Describe how I reviewed the code and checked that I can explain it.]
+**Decisions that remained mine** (recorded in DECISIONS.md):
+- **Scope:**
+  - I asked for data surveys of every track and every Pirelli compound before
+    choosing.
+  - I then chose the Hungaroring and compound C3, later adding C4.
+  - I chose all teams instead of Red Bull only, deliberately not modelling car
+    performance.
+  - I chose to use free data sources only.
+- **Methods:**
+  - I asked for a step-size study to find the optimal finite-difference step
+    (N3).
+  - I asked for alternative methods to be tried and compared (N7, N12).
+  - I chose the near-singular threshold of 1e12.
+  - I chose the cleaning, fuel and pit-loss options of Phase 2.
+  - I first chose a strict root-finder stopping rule. The AI then showed that it
+    can fail to stop, so I approved the round-off safeguard.
+- **Questions that changed the analysis:**
+  - Whether track temperature should be a model input, and which other
+    tyre-wear factors were missing. These led to the documented factor reviews.
+  - How to handle the failed bias criterion on the 2025 test race.
+- **Publication:** making the repository public and rewriting the git history
+  to remove local paths.
 
-**How the results were checked.**
-- Every from-scratch method is tested against a benchmark: SciPy,
-  scikit-learn, `numpy.linalg.lstsq` or an analytic solution.
-- The models were selected by leave-one-race-out cross-validation and then
-  tested once on a withheld race (2025), protected by a test firewall (D55).
-- The test suite runs offline: 940 tests and doctests.
-- A reproducibility check compares the SHA-256 hash of every result file
-  between runs (D83).
+**How the AI's work was checked.**
+- **Numerical methods:** every from-scratch method is tested against SciPy,
+  scikit-learn, `numpy.linalg.lstsq` or an analytic solution. The observed
+  orders of convergence match the theory: Euler 1.0, Heun 2.0, RK4 4.0.
+- **Models:** the models were chosen by leave-one-race-out cross-validation.
+  The test race was evaluated only once, behind a firewall that the code
+  enforces.
+- **Audit:** an audit stage checks for data leakage and checks the pit-stop
+  constraints with an independent exhaustive search.
+- **Reproducibility:** a fresh clone from GitHub reproduced all 52 result files
+  byte for byte.
+- **My own checks:** I read each phase summary, which listed every assumption
+  and uncertainty, before I approved the commit. I asked for explanations of
+  anything I could not yet defend, such as the interquartile range (IQR) and the
+  purpose of a validation test.
 
-**Limitations of the AI assistance I noticed** (all logged in CHALLENGES.md):
-- It wrote doctest examples and expected values without running them first,
-  and some failed (C3: placeholder examples that did not load; C11: a wrong
-  hand count).
-- A verification run it started overwrote the frozen model selection; it was
-  restored from git and a guard was added (C16).
-- It leaked my local file paths into generated files three times (C17, C19, C20).
-- It left 126 public objects with incomplete docstrings until a review
-  script found them (C22).
-- Some values rest only on secondary sources, which the AI flagged for me to
-  verify. For example, the 0.03 s/kg fuel figure has no primary source (D22).
+**Errors and limitations of the AI** (all logged in CHALLENGES.md):
+- It wrote doctest examples and expected values without running them, and some
+  failed (C3, C11).
+- A verification re-run it started overwrote the frozen model selection after
+  the test. It was restored from git and a guard was added (C16).
+- It leaked my local file paths into generated files three times (C17, C19,
+  C20).
+- It left 126 public objects with incomplete docstrings, against the project's
+  own rule, until a review script found them (C22).
+- It left a docstring that contradicted a later decision (C23).
+- It did not anticipate that the F1 data archive would be locked, or that the
+  first chosen compound had no data, so the scope changed three times in
+  Phase 1.
+- Its first root-finder stopping rule could fail to stop (D30 amendment).
 
-[Add my own reflection: what I learned, what I would do differently.]
+**Effect on my understanding and workflow.**
+- The protocol turned the AI from a code generator into something that
+  explained options I had to choose between. I learned the methods through
+  those choices: why central differences beat forward differences, why the
+  normal equations lose accuracy as the condition number grows, and why
+  cross-validation within past seasons cannot detect a change between seasons.
+- The AI's mistakes showed me that output that looks plausible is not verified
+  output. A test written from an expected value nobody computed proves nothing.
+- Every generated file has to be checked before it is published.
+- Because I must explain this work without AI in the oral examination, I
+  treated every decision in DECISIONS.md as something I need to be able to
+  defend myself.
 
 ## Licence
 
