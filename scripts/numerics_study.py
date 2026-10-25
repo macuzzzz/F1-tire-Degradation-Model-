@@ -35,6 +35,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from scipy.integrate import solve_ivp  # noqa: E402
 
+# Make the package in src/ importable when this script is run directly.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
@@ -48,6 +49,7 @@ from tyredeg.numerics.linear_solvers import NearSingularWarning  # noqa: E402
 from tyredeg.numerics.ode_solvers import euler, heun, rk4, rk45  # noqa: E402
 from tyredeg.numerics.root_finding import bisection, newton, secant  # noqa: E402
 
+# Output folders for the tables and figures.
 REPORTS = REPO_ROOT / "reports"
 FIGURES = REPORTS / "figures"
 
@@ -56,10 +58,12 @@ FIGURES = REPORTS / "figures"
 A_WEAR, B_WEAR, LAPS = 0.05, 0.03, 40.0
 
 
+# Right-hand side of the test ODE dd/dn = a + b d (a known exact solution exists).
 def wear_rhs(t, d):
     return A_WEAR + B_WEAR * d
 
 
+# Exact value at lap 40, used to measure each solver's error.
 WEAR_EXACT = A_WEAR / B_WEAR * (np.exp(B_WEAR * LAPS) - 1.0)
 
 
@@ -67,21 +71,27 @@ WEAR_EXACT = A_WEAR / B_WEAR * (np.exp(B_WEAR * LAPS) - 1.0)
 # 1. Fixed-step ODE solvers: error vs h
 # ---------------------------------------------------------------------------
 def study_fixed_step():
+    # Solve the test ODE with each fixed-step method for step sizes from 10 laps down to 0.0006
+    # laps.
     rows = []
     step_counts = 2 ** np.arange(2, 17)  # 4 ... 65536 steps over 40 laps
     for name, solver in (("Euler", euler), ("Heun", heun), ("RK4", rk4)):
         for n in step_counts:
             h = LAPS / n
             _, d, nfev = solver(wear_rhs, (0.0, LAPS), 0.0, h)
+            # Record the error at lap 40 against the exact solution.
             rows.append({"method": name, "h": h, "nfev": nfev,
                          "error": abs(d[-1] - WEAR_EXACT)})
     table = pd.DataFrame(rows)
     table.to_csv(REPORTS / "phase3_ode_fixed_step.csv", index=False)
 
+    # Error vs step on log-log axes; the slope shows each method's order of convergence.
     fig, ax = plt.subplots(figsize=(7, 4.5))
     summary = []
     for name, group in table.groupby("method", sort=False):
         ax.loglog(group["h"], group["error"], "o-", label=name)
+        # Mark the smallest error (beyond it round-off takes over) and the largest step within 1
+        # ms.
         best = group.loc[group["error"].idxmin()]
         ax.plot(best["h"], best["error"], "k*", markersize=12)
         within_1ms = group[group["error"] <= 1e-3]
@@ -107,12 +117,14 @@ def study_fixed_step():
 # 2. RK45: accuracy vs cost, controller settings, SciPy
 # ---------------------------------------------------------------------------
 def study_rk45():
+    # Three step-size controller settings: (safety, min_factor, max_factor).
     controllers = {
         "approved (0.9, 0.2, 10)": dict(safety=0.9, min_factor=0.2, max_factor=10.0),
         "conservative (0.8, 0.2, 5)": dict(safety=0.8, min_factor=0.2, max_factor=5.0),
         "cautious growth (0.9, 0.2, 2)": dict(safety=0.9, min_factor=0.2, max_factor=2.0),
     }
     rows = []
+    # For each tolerance: run my RK45 with each controller, then SciPy's RK45 as the benchmark.
     for rtol in 10.0 ** -np.arange(2, 13):
         atol = rtol * 1e-3
         for label, settings in controllers.items():
@@ -125,6 +137,7 @@ def study_rk45():
     table = pd.DataFrame(rows)
     table.to_csv(REPORTS / "phase3_rk45.csv", index=False)
 
+    # Error against cost (function evaluations) for every solver.
     fig, ax = plt.subplots(figsize=(7, 4.5))
     for label, group in table.groupby("solver", sort=False):
         style = "k--x" if label == "SciPy RK45" else "o-"
@@ -145,24 +158,29 @@ def study_rk45():
 # 3. Finite differences: error vs h
 # ---------------------------------------------------------------------------
 def study_finite_differences():
+    # Formula, the exact derivative it should give, and its default step exponent.
     formulas = {
         "forward": (fd.forward_difference, np.cos, fd.FORWARD_STEP_EXPONENT),
         "backward": (fd.backward_difference, np.cos, fd.FORWARD_STEP_EXPONENT),
         "central": (fd.central_difference, np.cos, fd.CENTRAL_STEP_EXPONENT),
         "central 2nd": (fd.central_second_difference, lambda x: -np.sin(x), fd.SECOND_STEP_EXPONENT),
     }
+    # Steps from 1e-12 to 0.1, at x = 1 and at x = 10.
     steps = np.logspace(-12, -1, 221)
     rows, summary = [], []
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
     for ax, x in zip(axes, (1.0, 10.0)):
         for name, (method, exact, exponent) in formulas.items():
+            # Error of each formula at every step against the exact derivative of sin(x).
             errors = np.array([abs(method(np.sin, x, h) - exact(x)) for h in steps])
             for h, error in zip(steps, errors):
                 rows.append({"x": x, "formula": name, "h": h, "error": error})
             # Smooth the noisy round-off region with a 9-point running median
             # before locating the minimum, so one lucky value does not decide.
+            # Smooth the noisy round-off region before locating the empirical optimal step.
             smooth = pd.Series(errors).rolling(9, center=True, min_periods=1).median().to_numpy()
             h_empirical = steps[int(np.argmin(smooth))]
+            # Compare it with the theoretical default step and record the error there.
             h_default = float(fd.default_step(x, exponent))
             error_default = abs(method(np.sin, x) - exact(x))
             summary.append({"x": x, "formula": name, "h_theory": h_default,
@@ -170,6 +188,7 @@ def study_finite_differences():
                             "ratio_empirical_to_theory": h_empirical / h_default,
                             "error_at_default": error_default,
                             "min_smoothed_error": float(np.min(smooth))})
+            # Plot the error curves; the dashed line marks the default step of each formula.
             if name != "backward":
                 line, = ax.loglog(steps, errors, label=name, linewidth=1)
                 ax.axvline(h_default, color=line.get_color(), linestyle="--", linewidth=0.8)
@@ -189,15 +208,18 @@ def study_finite_differences():
 # 4. Root finding: convergence and stopping rules
 # ---------------------------------------------------------------------------
 def study_root_finding():
+    # Test problem x^2 - 2 = 0, root sqrt(2).
     root = np.sqrt(2.0)
     f = lambda x: x**2 - 2.0  # noqa: E731
     fprime = lambda x: 2.0 * x  # noqa: E731
+    # Convergence history of each root finder with the default tolerances.
     histories = {
         "bisection": bisection(f, 1.0, 2.0).history,
         "secant": secant(f, 1.0, 2.0).history,
         "newton": newton(f, fprime, 1.0).history,
     }
     fig, ax = plt.subplots(figsize=(7, 4.5))
+    # Error per iteration on a log scale (linear, super-linear and quadratic convergence).
     for name, history in histories.items():
         errors = np.maximum(np.abs(history - root), 1e-17)
         ax.semilogy(np.arange(len(errors)), errors, "o-", label=name)
@@ -211,6 +233,7 @@ def study_root_finding():
     plt.close(fig)
 
     # Stopping rules: step only (ftol = 0), residual only (xtol = 0), either.
+    # Harder problems for the stopping-rule study: a flat triple root and two steep functions.
     problems = {
         "x^2 - 2 (simple root)": (f, fprime, 1.0, 2.0, root),
         "(x - 1)^3 (flat, triple root)": (lambda x: (x - 1.0) ** 3, lambda x: 3.0 * (x - 1.0) ** 2,
@@ -224,6 +247,7 @@ def study_root_finding():
                                                   30.0, 40.0, 10 * np.log(30.0)),
     }
     # A tolerance of 0 switches that test off, so these give the three rules.
+    # Compare three stopping rules on every problem and method.
     rules = {"step only": dict(ftol=0.0), "residual only": dict(xtol=0.0),
              "both + round-off safeguard (approved)": {}}
     rows = []
@@ -235,6 +259,7 @@ def study_root_finding():
                 "newton": lambda: newton(g, gprime, b, max_iter=200, **tolerances),
             }
             for method, run in runs.items():
+                # Record iterations and error, or the type of failure if the method could not stop.
                 try:
                     result = run()
                     rows.append({"problem": problem, "rule": rule, "method": method,
@@ -254,6 +279,8 @@ def study_root_finding():
 # ---------------------------------------------------------------------------
 def scaled_coefficients(unscaled, centre, half_range):
     """Coefficients b_k of sum_k b_k s^k equal to sum_j a_j x^j with x = c + r s."""
+    # Convert true coefficients in powers of x into powers of the scaled variable (reference
+    # values).
     from math import comb
 
     scaled = np.zeros(len(unscaled))
@@ -264,28 +291,34 @@ def scaled_coefficients(unscaled, centre, half_range):
 
 
 def study_least_squares():
+    # Tyre ages 1-41 laps and noise-free data from known coefficients, for degrees 1-6.
     age = np.arange(1, 42, dtype=float)  # tyre ages 1-41 laps, as in the data
     rows = []
     for degree in range(1, 7):
         # Noise-free data from known coefficients, so the exact answer is known.
         true_unscaled = np.array([80.0, 0.05] + [1e-4 * (-1) ** k for k in range(degree - 1)])
         y = polynomial_design_matrix(age, degree) @ true_unscaled
+        # Fit with and without scaling the inputs to [-1, 1].
         for scaled in (False, True):
             centre, half_range = (21.0, 20.0) if scaled else (0.0, 1.0)
             X = polynomial_design_matrix(age, degree, centre, half_range)
             # Reference coefficients in this basis: substitute x = c + r s into
             # sum_j a_j x^j and expand with the binomial theorem (exact algebra,
             # no ill-conditioned solve), so the reference is not the weak link.
+            # Exact coefficients in the basis being fitted.
             reference = scaled_coefficients(true_unscaled, centre, half_range)
+            # My normal equations, QR with my back substitution, and NumPy's SVD-based lstsq.
             methods = {
                 "normal (mine)": lambda: fit_linear_least_squares(X, y).coefficients,
                 "QR (numpy QR + my back subst.)": lambda: fit_linear_least_squares_qr(X, y).coefficients,
                 "SVD (numpy lstsq)": lambda: np.linalg.lstsq(X, y, rcond=None)[0],
             }
             for method, run in methods.items():
+                # Record whether my solver warned about ill-conditioning.
                 with warnings.catch_warnings(record=True) as caught:
                     warnings.simplefilter("always", NearSingularWarning)
                     beta = run()
+                # Relative error of the fitted coefficients.
                 relative_error = np.linalg.norm(beta - reference) / np.linalg.norm(reference)
                 rows.append({"degree": degree, "scaled": scaled, "method": method,
                              "cond_X": np.linalg.cond(X), "relative_error": relative_error,
@@ -293,6 +326,7 @@ def study_least_squares():
     table = pd.DataFrame(rows)
     table.to_csv(REPORTS / "phase3_least_squares.csv", index=False)
 
+    # Error vs degree, unscaled (left) and scaled (right).
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
     for ax, scaled in zip(axes, (False, True)):
         subset = table[table["scaled"] == scaled]
@@ -310,6 +344,7 @@ def study_least_squares():
 
 
 def main():
+    # Run all five studies and print their summaries.
     FIGURES.mkdir(parents=True, exist_ok=True)
     pd.set_option("display.width", 200)
     pd.set_option("display.float_format", lambda v: f"{v:.3g}")

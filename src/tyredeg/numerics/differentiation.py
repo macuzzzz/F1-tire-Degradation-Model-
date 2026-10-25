@@ -38,13 +38,17 @@ from __future__ import annotations
 import numpy as np
 
 # Defaults; identical to `numerics.differentiation` in config.yaml (D38).
+# Optimal-step exponents: truncation error ~h^p and round-off ~eps/h^q balance at h ~
+# eps^(1/(p+q)).
 FORWARD_STEP_EXPONENT = 0.5
 CENTRAL_STEP_EXPONENT = 1.0 / 3.0
 SECOND_STEP_EXPONENT = 0.25
 
+# Machine epsilon: the relative round-off error of one floating-point number.
 EPS = np.finfo(float).eps
 
 # Relative tolerance for deciding that sample spacing is uniform.
+# Sample spacings may differ by this relative amount and still count as uniform.
 UNIFORM_SPACING_RTOL = 1e-9
 
 
@@ -76,17 +80,21 @@ def default_step(x, exponent):
     >>> float(default_step(1.0, 0.5)) == float(np.sqrt(np.finfo(float).eps))
     True
     """
+    # Reject NaN/inf points and a non-positive exponent before computing the step.
     if not np.all(np.isfinite(np.asarray(x, dtype=float))):
         raise ValueError("x must be finite.")
     if not exponent > 0:
         raise ValueError(f"exponent must be > 0, got {exponent}.")
+    # Scale with |x| so the step stays above round-off for large x, but never below eps^exponent.
     return EPS**exponent * np.maximum(1.0, np.abs(np.asarray(x, dtype=float)))
 
 
 def _step(x, h, exponent):
     """Return h if given (checked), else the default step for x."""
+    # No step given: use the optimal default for this formula.
     if h is None:
         return default_step(x, exponent)
+    # A user-supplied step must be finite and positive.
     h = np.asarray(h, dtype=float)
     if not np.all(np.isfinite(h)) or np.any(h <= 0):
         raise ValueError(f"h must be finite and > 0, got {h}.")
@@ -95,8 +103,10 @@ def _step(x, h, exponent):
 
 def _point(x):
     """Return x as a float array, raising if it is not finite."""
+    # Strings would be silently converted by NumPy, so reject them explicitly.
     if isinstance(x, str):
         raise TypeError("x must be a number or an array of numbers.")
+    # Accept a scalar or an array of points, all finite.
     x = np.asarray(x, dtype=float)
     if not np.all(np.isfinite(x)):
         raise ValueError("x must be finite.")
@@ -104,12 +114,14 @@ def _point(x):
 
 
 def _check_function(f):
+    # f is called with the point(s), so it must be callable.
     if not callable(f):
         raise TypeError("f must be callable.")
 
 
 def _scalar_or_array(values):
     """Return a float for 0-d results, else the array."""
+    # Return a plain float for a scalar point, an array otherwise.
     values = np.asarray(values, dtype=float)
     return float(values) if values.ndim == 0 else values
 
@@ -146,9 +158,11 @@ def forward_difference(f, x, h=None):
     >>> bool(round(forward_difference(np.sin, 1.0), 6) == round(np.cos(1.0), 6))
     True
     """
+    # Check f and x, then choose the step (forward differences use the eps^(1/2) default).
     _check_function(f)
     x = _point(x)
     h = _step(x, h, FORWARD_STEP_EXPONENT)
+    # Forward difference: slope of the chord from x to x + h.
     return _scalar_or_array((f(x + h) - f(x)) / h)
 
 
@@ -181,9 +195,11 @@ def backward_difference(f, x, h=None):
     >>> bool(round(backward_difference(np.sin, 1.0), 6) == round(np.cos(1.0), 6))
     True
     """
+    # Check f and x, then choose the step (same default as the forward difference).
     _check_function(f)
     x = _point(x)
     h = _step(x, h, FORWARD_STEP_EXPONENT)
+    # Backward difference: slope of the chord from x - h to x.
     return _scalar_or_array((f(x) - f(x - h)) / h)
 
 
@@ -219,9 +235,11 @@ def central_difference(f, x, h=None):
     >>> bool(abs(central_difference(np.sin, 1.0) - np.cos(1.0)) < 1e-10)
     True
     """
+    # Check f and x, then choose the step (central differences use the eps^(1/3) default).
     _check_function(f)
     x = _point(x)
     h = _step(x, h, CENTRAL_STEP_EXPONENT)
+    # Central difference: chord from x - h to x + h; the O(h) errors of both sides cancel.
     return _scalar_or_array((f(x + h) - f(x - h)) / (2.0 * h))
 
 
@@ -254,9 +272,11 @@ def central_second_difference(f, x, h=None):
     >>> bool(abs(central_second_difference(np.sin, 1.0) + np.sin(1.0)) < 1e-7)
     True
     """
+    # Check f and x, then choose the step (second derivative uses the eps^(1/4) default).
     _check_function(f)
     x = _point(x)
     h = _step(x, h, SECOND_STEP_EXPONENT)
+    # Second difference: change of slope between the two half-intervals, divided by h.
     return _scalar_or_array((f(x + h) - 2.0 * f(x) + f(x - h)) / h**2)
 
 
@@ -265,6 +285,7 @@ def central_second_difference(f, x, h=None):
 # ---------------------------------------------------------------------------
 def _samples(x, y, minimum):
     """Validate sample arrays; return (x, y, spacing h)."""
+    # Convert to float arrays and check shape, length, size and finiteness.
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     if x.ndim != 1 or y.ndim != 1:
@@ -275,6 +296,7 @@ def _samples(x, y, minimum):
         raise ValueError(f"At least {minimum} samples are needed, got {x.size}.")
     if not (np.all(np.isfinite(x)) and np.all(np.isfinite(y))):
         raise ValueError("x and y must not contain NaN or infinite values.")
+    # All gaps between samples must be equal (the formulas assume one step h).
     spacing = np.diff(x)
     h = spacing[0]
     if h <= 0:
@@ -310,7 +332,9 @@ def forward_difference_samples(x, y):
     >>> forward_difference_samples([0, 1, 2], [0, 1, 4]).tolist()
     [1.0, 3.0]
     """
+    # Validate the samples (at least 2) and get the common spacing h.
     x, y, h = _samples(x, y, 2)
+    # Slope between each sample and the next: n - 1 values, one per x[:-1].
     return (y[1:] - y[:-1]) / h
 
 
@@ -340,7 +364,9 @@ def backward_difference_samples(x, y):
     >>> backward_difference_samples([0, 1, 2], [0, 1, 4]).tolist()
     [1.0, 3.0]
     """
+    # Validate the samples (at least 2) and get the common spacing h.
     x, y, h = _samples(x, y, 2)
+    # Same differences as the forward version, but each one belongs to the later point x[1:].
     return (y[1:] - y[:-1]) / h
 
 
@@ -373,9 +399,12 @@ def central_difference_samples(x, y):
     >>> central_difference_samples([0, 1, 2, 3], [0, 1, 4, 9]).tolist()
     [0.0, 2.0, 4.0, 6.0]
     """
+    # Validate the samples (at least 3) and get the common spacing h.
     x, y, h = _samples(x, y, 3)
     derivative = np.empty_like(y)
+    # Interior points: central difference using both neighbours (error O(h^2)).
     derivative[1:-1] = (y[2:] - y[:-2]) / (2.0 * h)
+    # End points have only one neighbour side, so use one-sided 3-point formulas, also O(h^2).
     derivative[0] = (-3.0 * y[0] + 4.0 * y[1] - y[2]) / (2.0 * h)
     derivative[-1] = (3.0 * y[-1] - 4.0 * y[-2] + y[-3]) / (2.0 * h)
     return derivative
@@ -410,9 +439,12 @@ def central_second_difference_samples(x, y):
     >>> central_second_difference_samples([0, 1, 2, 3], [0, 1, 4, 9]).tolist()
     [2.0, 2.0, 2.0, 2.0]
     """
+    # Validate the samples (at least 4) and get the common spacing h.
     x, y, h = _samples(x, y, 4)
     second = np.empty_like(y)
+    # Interior points: standard 3-point second difference (error O(h^2)).
     second[1:-1] = (y[2:] - 2.0 * y[1:-1] + y[:-2]) / h**2
+    # End points: one-sided 4-point formulas that keep second-order accuracy.
     second[0] = (2.0 * y[0] - 5.0 * y[1] + 4.0 * y[2] - y[3]) / h**2
     second[-1] = (2.0 * y[-1] - 5.0 * y[-2] + 4.0 * y[-3] - y[-4]) / h**2
     return second

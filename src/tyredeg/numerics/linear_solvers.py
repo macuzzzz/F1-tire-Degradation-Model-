@@ -36,6 +36,7 @@ import numpy as np
 # Default; identical to `numerics.linear.condition_warning_threshold` (D38).
 DEFAULT_CONDITION_THRESHOLD = 1.0e12
 
+# Machine epsilon, used to decide when a pivot is numerically zero.
 EPS = np.finfo(float).eps
 
 
@@ -88,6 +89,7 @@ class LinearSolveResult:
 # ---------------------------------------------------------------------------
 def _square_matrix(A):
     A = np.array(A, dtype=float)  # a copy, so the caller's matrix is untouched
+    # Must be a non-empty square matrix of finite numbers.
     if A.ndim != 2 or A.shape[0] != A.shape[1] or A.shape[0] == 0:
         raise ValueError(f"A must be a non-empty square matrix, got shape {A.shape}.")
     if not np.all(np.isfinite(A)):
@@ -96,6 +98,7 @@ def _square_matrix(A):
 
 
 def _right_hand_side(b, n):
+    # b may be one vector or several columns (one solve per column), with n rows.
     b = np.array(b, dtype=float)
     if b.ndim not in (1, 2) or b.shape[0] != n:
         raise ValueError(f"b must have {n} rows, got shape {b.shape}.")
@@ -134,16 +137,20 @@ def forward_substitution(L, b, unit_diagonal=False):
     >>> forward_substitution([[2.0, 0.0], [1.0, 1.0]], [4.0, 3.0]).tolist()
     [2.0, 1.0]
     """
+    # Solve L z = b from the top row down: each row adds one new unknown.
     L = _square_matrix(L)
     b = _right_hand_side(b, L.shape[0])
+    # Result has the same shape as b (also works for several right-hand sides).
     n = L.shape[0]
     z = np.zeros_like(b)
     for i in range(n):
         # Everything already known (z_0 .. z_{i-1}) is moved to the right side.
         known = L[i, :i] @ z[:i]
         if unit_diagonal:
+            # Unit lower triangle (from LU): the diagonal is 1 by construction, so no division.
             z[i] = b[i] - known
         else:
+            # A zero on the diagonal means this row cannot be solved.
             if L[i, i] == 0:
                 raise ValueError(f"Zero diagonal entry in row {i}.")
             z[i] = (b[i] - known) / L[i, i]
@@ -175,13 +182,16 @@ def back_substitution(U, b):
     >>> back_substitution([[2.0, 1.0], [0.0, 4.0]], [5.0, 8.0]).tolist()
     [1.5, 2.0]
     """
+    # Solve U x = b from the bottom row up: each row adds one new unknown.
     U = _square_matrix(U)
     b = _right_hand_side(b, U.shape[0])
     n = U.shape[0]
     x = np.zeros_like(b)
     for i in range(n - 1, -1, -1):
+        # A zero on the diagonal means this row cannot be solved.
         if U[i, i] == 0:
             raise ValueError(f"Zero diagonal entry in row {i}.")
+        # Subtract the already known unknowns, then divide by the diagonal entry.
         known = U[i, i + 1:] @ x[i + 1:]
         x[i] = (b[i] - known) / U[i, i]
     return x
@@ -219,14 +229,18 @@ def lu_factor(A):
     >>> perm.tolist()   # the zero pivot forced a row swap
     [1, 0]
     """
+    # Work on a copy of A that will hold L (below the diagonal) and U (on and above it).
     lu = _square_matrix(A)
     n = lu.shape[0]
+    # Track the row swaps so the right-hand side can be reordered the same way later.
     permutation = np.arange(n)
     # Scale-aware "zero": a pivot this small relative to A is round-off noise.
+    # Pivots smaller than this are round-off noise relative to the size of A.
     pivot_tolerance = n * EPS * np.max(np.abs(lu))
     if pivot_tolerance == 0:
         raise SingularMatrixError("A is the zero matrix.")
 
+    # Eliminate one column at a time.
     for k in range(n):
         # Partial pivoting: bring the largest |entry| of column k into row k.
         pivot_row = k + int(np.argmax(np.abs(lu[k:, k])))
@@ -234,12 +248,15 @@ def lu_factor(A):
             raise SingularMatrixError(
                 f"A is singular to working precision (pivot {lu[pivot_row, k]:.3e} in column {k})."
             )
+        # Swap the pivot row into place, in the matrix and in the permutation.
         if pivot_row != k:
             lu[[k, pivot_row]] = lu[[pivot_row, k]]
             permutation[[k, pivot_row]] = permutation[[pivot_row, k]]
         # Eliminate the entries below the pivot; keep the multipliers in place.
+        # Multipliers that zero the entries below the pivot; stored in place as the L part.
         multipliers = lu[k + 1:, k] / lu[k, k]
         lu[k + 1:, k] = multipliers
+        # Subtract multiplier x pivot row from every row below (the elimination step).
         lu[k + 1:, k + 1:] -= np.outer(multipliers, lu[k, k + 1:])
     return lu, permutation
 
@@ -270,6 +287,7 @@ def lu_solve(lu, permutation, b):
     >>> lu_solve(lu, perm, [1.0, 5.0]).tolist()
     [1.0, 1.0]
     """
+    # Reorder b like the rows of A, then solve L z = P b and U x = z.
     b = _right_hand_side(b, lu.shape[0])
     z = forward_substitution(lu, b[permutation], unit_diagonal=True)
     return back_substitution(lu, z)
@@ -304,10 +322,13 @@ def condition_number_1norm(A, lu=None, permutation=None):
     >>> condition_number_1norm([[2.0, 0.0], [0.0, 0.5]])
     4.0
     """
+    # Factorise A unless the caller already has its LU factors.
     A = _square_matrix(A)
     if lu is None or permutation is None:
         lu, permutation = lu_factor(A)
+    # Inverse of A, column by column, from the LU factors.
     inverse = lu_solve(lu, permutation, np.eye(A.shape[0]))
+    # 1-norm = largest absolute column sum; cond_1 = ||A||_1 * ||A^-1||_1.
     norm_a = np.max(np.sum(np.abs(A), axis=0))
     norm_inverse = np.max(np.sum(np.abs(inverse), axis=0))
     return float(norm_a * norm_inverse)
@@ -349,12 +370,15 @@ def gaussian_elimination(A, b, condition_threshold=DEFAULT_CONDITION_THRESHOLD):
     >>> result.x.tolist()
     [1.0, 1.0]
     """
+    # The threshold must be a finite number above 1 (cond >= 1 always).
     if not np.isfinite(condition_threshold) or condition_threshold <= 1:
         raise ValueError(f"condition_threshold must be > 1, got {condition_threshold}.")
+    # Factorise once, solve, and estimate the condition number from the same factors.
     A = _square_matrix(A)
     lu, permutation = lu_factor(A)
     x = lu_solve(lu, permutation, b)
     condition = condition_number_1norm(A, lu, permutation)
+    # Warn (but still return x) when A is so ill-conditioned that x has few correct digits.
     if condition > condition_threshold:
         warnings.warn(
             f"Matrix is ill-conditioned (1-norm condition estimate {condition:.2e} > "

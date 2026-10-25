@@ -78,6 +78,7 @@ def messages_from_records(records):
     >>> df["category"].tolist()
     ['SafetyCar']
     """
+    # Validate the records; an empty list gives an empty table with the right columns.
     if not isinstance(records, list):
         raise TypeError(f"records must be a list of dicts, got {type(records).__name__}.")
     if len(records) == 0:
@@ -87,6 +88,7 @@ def messages_from_records(records):
         if missing:
             raise ValueError(f"Race-control record is missing keys {missing}: {record}")
 
+    # Keep the needed columns, convert dates to plain UTC and sort by time.
     messages = pd.DataFrame(records)[list(MESSAGE_COLUMNS)].copy()
     messages["date"] = to_naive_utc(messages["date"])
     return messages.sort_values("date", kind="stable").reset_index(drop=True)
@@ -118,6 +120,7 @@ def to_naive_utc(values):
     >>> to_naive_utc(pd.Series(["2023-07-23T15:10:00+02:00"])).iloc[0]
     Timestamp('2023-07-23 13:10:00')
     """
+    # Parse ISO 8601 strings to UTC, then drop the time-zone marker.
     try:
         parsed = pd.to_datetime(values, utc=True, format="ISO8601")
     except (ValueError, TypeError) as error:
@@ -137,6 +140,7 @@ class _TrackState:
 
     def is_green(self):
         """The track is green only if nothing at all is active."""
+        # The track is green only when no flag or safety-car condition is active.
         return not (
             self.yellow_sectors
             or self.track_yellow
@@ -147,6 +151,7 @@ class _TrackState:
 
     def clear_everything(self):
         """"TRACK CLEAR" (or a green flag for the whole track) ends every hazard."""
+        # Reset every condition (used for a track-wide green/clear message).
         self.yellow_sectors.clear()
         self.track_yellow = False
         self.safety_car = False
@@ -155,6 +160,7 @@ class _TrackState:
 
     def apply(self, category, flag, scope, sector, message):
         """Update the state with one message."""
+        # Route the message by category; other categories do not change the track state.
         if category == "SafetyCar":
             self._apply_safety_car(message)
         elif category == "Flag":
@@ -165,6 +171,7 @@ class _TrackState:
     def _apply_safety_car(self, message):
         # The VIRTUAL check must come first, because "VIRTUAL SAFETY CAR
         # DEPLOYED" also contains the words "SAFETY CAR DEPLOYED".
+        # Check the VSC wording first, because it also contains "SAFETY CAR DEPLOYED".
         if "VIRTUAL SAFETY CAR DEPLOYED" in message:
             self.virtual_safety_car = True
         elif "SAFETY CAR DEPLOYED" in message:
@@ -174,11 +181,13 @@ class _TrackState:
         # state is deliberately left unchanged here.
 
     def _apply_flag(self, flag, scope, sector):
+        # Yellow: in one sector, or for the whole track.
         if flag in YELLOW_FLAGS:
             if scope == "Sector" and sector is not None:
                 self.yellow_sectors.add(sector)
             else:
                 self.track_yellow = True
+        # Clear: ends a sector yellow, or everything if it applies to the whole track.
         elif flag == "CLEAR":
             if scope == "Sector" and sector is not None:
                 self.yellow_sectors.discard(sector)
@@ -194,6 +203,7 @@ class _TrackState:
 
 def _text(value):
     """Return ``value`` as an upper-case string, or "" if it is missing."""
+    # Normalise text fields: missing becomes "", everything upper-case.
     if value is None or pd.isna(value):
         return ""
     return str(value).upper()
@@ -201,6 +211,7 @@ def _text(value):
 
 def _sector(value):
     """Return the sector number as an int, or None if it is missing."""
+    # Sector numbers as int; missing stays None.
     if value is None or pd.isna(value):
         return None
     return int(value)
@@ -238,16 +249,19 @@ def non_green_intervals(messages):
     >>> non_green_intervals(msgs)
     [(Timestamp('2023-07-23 13:20:00'), Timestamp('2023-07-23 13:20:30'))]
     """
+    # Validate the message table.
     if not isinstance(messages, pd.DataFrame):
         raise TypeError(f"messages must be a DataFrame, got {type(messages).__name__}.")
     missing = [column for column in MESSAGE_COLUMNS if column not in messages.columns]
     if missing:
         raise ValueError(f"messages is missing columns: {missing}")
 
+    # Replay the messages in time order, tracking the current track state.
     state = _TrackState()
     intervals = []
     window_start = None  # start time of the current not-green window, if any
 
+    # Update the state with each message.
     for row in messages.sort_values("date", kind="stable").itertuples(index=False):
         state.apply(
             category=str(row.category) if row.category is not None else "",
@@ -256,12 +270,14 @@ def non_green_intervals(messages):
             sector=_sector(row.sector),
             message=_text(row.message),
         )
+        # Open a window when the track stops being green, close it when it is green again.
         if not state.is_green() and window_start is None:
             window_start = row.date
         elif state.is_green() and window_start is not None:
             intervals.append((window_start, row.date))
             window_start = None
 
+    # A window still open at the end lasts until the end of the data.
     if window_start is not None:
         intervals.append((window_start, pd.Timestamp.max))
     return intervals
@@ -300,10 +316,12 @@ def is_green_lap(lap_start, lap_time_s, intervals):
     >>> is_green_lap(start, 50.0, window)   # lap ends 13:19:50, before it
     True
     """
+    # Missing timing cannot be shown to be green; a negative lap time is invalid.
     if lap_start is None or pd.isna(lap_start) or lap_time_s is None or pd.isna(lap_time_s):
         return False
     if lap_time_s < 0:
         raise ValueError(f"lap_time_s must be >= 0 s, got {lap_time_s}.")
+    # The lap covers [start, start + lap time].
     lap_end = lap_start + pd.Timedelta(seconds=float(lap_time_s))
     for window_start, window_end in intervals:
         # Two time ranges overlap if each one starts before the other ends.

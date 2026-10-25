@@ -58,6 +58,7 @@ def analytic_models(max_a=69, max_b=69):
 
 
 def analytic_time(pit_lap):
+    # Closed-form race time for linear degradation (sums of arithmetic series).
     m = N - pit_lap
     return B1 * pit_lap + A1 * pit_lap * (pit_lap + 1) / 2 + B2 * m + A2 * m * (m + 1) / 2 + P
 
@@ -67,11 +68,13 @@ def analytic_time(pit_lap):
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("pit_lap", [1, 20, 40, 69])
 def test_race_time_matches_analytic_formula(pit_lap):
+    # The code's race time must equal the closed-form formula.
     assert race_time(pit_lap, "C3", "C4", analytic_models(), N, P, add_fuel_effect=False) == \
         pytest.approx(analytic_time(pit_lap), rel=1e-12)
 
 
 def test_fuel_effect_shifts_every_strategy_by_the_same_amount():
+    # Fuel adds the same time to every strategy, so it cannot change the optimum.
     models, k_fuel = analytic_models(), 0.046
     for pit_lap in (25, 40, 55):
         with_fuel = race_time(pit_lap, "C3", "C4", models, N, P, k_fuel=k_fuel, add_fuel_effect=True)
@@ -92,6 +95,7 @@ def test_compound_order_is_symmetric():
 
 
 def test_stint_time_and_total_race_time():
+    # Stint times and multi-stop totals match hand-computed sums.
     models = analytic_models()
     assert stint_time(models["C3"], 0) == 0.0
     assert stint_time(models["C3"], 3) == pytest.approx(3 * B1 + A1 * 6)
@@ -124,6 +128,7 @@ def test_continuous_relaxation_finds_analytic_optimum(root_finder):
 
 
 def test_continuous_relaxation_equals_race_time_at_integers_for_linear_models():
+    # For linear models the continuous race time equals the discrete one at whole laps.
     models = analytic_models()
     for pit_lap in (5, 40, 64):
         assert race_time_continuous(float(pit_lap), "C3", "C4", models, N, P) == \
@@ -173,6 +178,7 @@ def test_wear_ode_cumulative_degradation_is_close_to_the_sum():
 
 
 def test_wear_ode_continuous_optimum_matches_brute_force():
+    # For the wear ODE the continuous optimum must agree with brute force.
     ages = np.tile(np.arange(1.0, 31.0), 2)
     ids = [0] * 30 + [1] * 30
     models = {
@@ -187,6 +193,7 @@ def test_wear_ode_continuous_optimum_matches_brute_force():
 
 
 def test_knn_has_no_continuous_relaxation_but_brute_force_works():
+    # KNN has no continuous form, so only brute force can be used with it.
     ages = np.tile(np.arange(1.0, 41.0), 3)
     knn = KNNDegradationModel("C3", k=3).fit(ages, 80 + 0.06 * ages, [0] * 40 + [1] * 40 + [2] * 40)
     models = {"C3": CompoundModel("C3", knn, B1, 40), "C4": analytic_models()["C4"]}
@@ -261,6 +268,7 @@ def test_order_balanced_compound_delta_removes_order_effect():
 
 
 def test_compound_delta_needs_both_orders():
+    # The compound pace difference needs stints in both orders (C3 then C4, and C4 then C3).
     df = pd.DataFrame({"race": ["r", "r"], "driver": ["A", "A"], "stint": [1, 2],
                        "compound": ["C4", "C3"], "offset": [80.2, 80.0]})
     with pytest.raises(ValueError, match="Both stint orders"):
@@ -286,6 +294,7 @@ def test_compound_delta_needs_both_orders():
     ],
 )
 def test_race_time_invalid_inputs(kwargs, error):
+    # Each invalid argument is rejected with the expected error type.
     arguments = dict(pit_lap=40, compound_1="C3", compound_2="C4", models=analytic_models(),
                      total_laps=N, pit_loss=P)
     arguments.update(kwargs)
@@ -302,6 +311,7 @@ def test_stint_longer_than_limit_is_rejected():
 
 
 def test_other_invalid_inputs():
+    # Invalid optimiser settings and strategies are rejected.
     models = analytic_models()
     with pytest.raises(ValueError):
         optimise_continuous("C3", "C4", models, N, P, root_finder="bisection")

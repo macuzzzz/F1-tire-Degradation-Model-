@@ -136,6 +136,7 @@ def validate_year(year):
     ...
     ValueError: year must be >= 2018 (no lap timing data before then), got 2010.
     """
+    # Booleans are rejected explicitly because True is also an int in Python.
     if isinstance(year, bool) or not isinstance(year, int):
         raise TypeError(f"year must be an int, got {year!r}.")
     if year < FIRST_SUPPORTED_YEAR:
@@ -168,6 +169,7 @@ def validate_event(event):
     ...
     ValueError: event must not be empty.
     """
+    # The event name must be a non-empty string.
     if not isinstance(event, str):
         raise TypeError(f"event must be a str, got {type(event).__name__}.")
     if event.strip() == "":
@@ -195,6 +197,7 @@ def validate_session(session):
     ...
     ValueError: session must be one of ('R',), got 'Q'.
     """
+    # Only race sessions ("R") are supported.
     if session not in SUPPORTED_SESSIONS:
         raise ValueError(f"session must be one of {SUPPORTED_SESSIONS}, got {session!r}.")
 
@@ -229,6 +232,7 @@ def check_event_name(returned_event, requested_event):
     >>> check_event_name("Hungarian Grand Prix", "hungarian grand prix")
     'Hungarian Grand Prix'
     """
+    # Compare names ignoring case and spaces; a mismatch means the source picked another race.
     returned_event = str(returned_event)
     if returned_event.strip().casefold() != requested_event.strip().casefold():
         raise RaceNotFoundError(
@@ -268,10 +272,13 @@ def make_race_id(year, event_name):
     >>> make_race_id(2023, "Hungarian Grand Prix")
     '2023_hungarian_grand_prix'
     """
+    # Validate the year and the event name.
     validate_year(year)
     if not isinstance(event_name, str):
         raise TypeError(f"event_name must be a str, got {type(event_name).__name__}.")
     # Replace every run of characters that are not a-z or 0-9 with one "_".
+    # Lower-case the name and replace every run of other characters with "_", e.g.
+    # "hungarian_grand_prix".
     slug = re.sub(r"[^a-z0-9]+", "_", event_name.lower()).strip("_")
     if slug == "":
         raise ValueError(f"event_name {event_name!r} contains no letters or digits.")
@@ -312,10 +319,12 @@ def finalise_laps(laps, year, event_name, total_laps, source):
     >>> table = finalise_laps(raw_rows, 2023, "Hungarian Grand Prix",
     ...                       float("nan"), "openf1")  # doctest: +SKIP
     """
+    # Text used in error messages.
     description = f"{year} {event_name} ({source})"
     if laps.empty:
         raise RaceDataUnavailableError(f"No laps were found for {description}.")
 
+    # Add the race-level columns to every lap.
     laps = laps.copy()
     laps["Year"] = year
     laps["EventName"] = event_name
@@ -323,16 +332,19 @@ def finalise_laps(laps, year, event_name, total_laps, source):
     laps["TotalLaps"] = float(total_laps)
     laps["Source"] = source
 
+    # Every unified column must be present before the table is used.
     missing = [column for column in UNIFIED_COLUMNS if column not in laps.columns]
     if missing:
         raise RaceDataUnavailableError(f"Laps for {description} are missing columns: {missing}")
 
+    # Fix the column types so tables from both sources can be stacked.
     for column in FLOAT_COLUMNS:
         laps[column] = laps[column].astype(float)
     for column in BOOLEAN_COLUMNS:
         laps[column] = laps[column].astype(bool)
     laps["DriverNumber"] = laps["DriverNumber"].astype(str)
 
+    # Put the unified columns first, then any optional ones, sorted by driver and lap.
     extra = [column for column in OPTIONAL_COLUMNS if column in laps.columns]
     ordered = laps[list(UNIFIED_COLUMNS) + extra]
     # Sorting makes the table deterministic regardless of the source's order.

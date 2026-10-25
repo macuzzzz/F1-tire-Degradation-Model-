@@ -80,6 +80,7 @@ MODEL_FACTORIES = {
     ],
 )
 def test_invalid_training_inputs(name, ages, times, ids):
+    # Each model rejects invalid training data.
     with pytest.raises(ValueError):
         MODEL_FACTORIES[name]().fit(ages, times, ids)
 
@@ -87,12 +88,14 @@ def test_invalid_training_inputs(name, ages, times, ids):
 @pytest.mark.parametrize("compound, error", [("HARD", ValueError), ("C9", ValueError), (3, TypeError)])
 @pytest.mark.parametrize("cls", [PolynomialDegradationModel, WearODEModel, KNNDegradationModel])
 def test_unknown_compound(cls, compound, error):
+    # Unknown compounds are rejected by every model.
     with pytest.raises(error):
         cls(compound)
 
 
 @pytest.mark.parametrize("name", MODEL_FACTORIES)
 def test_use_before_fit(name):
+    # Predicting or reading parameters before fitting raises NotFittedError.
     model = MODEL_FACTORIES[name]()
     with pytest.raises(NotFittedError):
         model.predict([5.0])
@@ -102,6 +105,7 @@ def test_use_before_fit(name):
 
 @pytest.mark.parametrize("name", MODEL_FACTORIES)
 def test_predict_is_base_plus_degradation(name):
+    # A predicted lap time is the base time plus the degradation at that age.
     ages, times, ids, _ = synthetic_stints(lambda n: 0.07 * n, n_stints=10)
     model = MODEL_FACTORIES[name]().fit(ages, times, ids)
     query = np.array([5.0, 10.0])
@@ -115,6 +119,7 @@ def test_predict_is_base_plus_degradation(name):
 
 
 def test_stint_labels_from_laps():
+    # Stint labels combine race, driver and stint number.
     import pandas as pd
 
     laps = pd.DataFrame({"RaceId": ["r1", "r1"], "Driver": ["VER", "HAM"], "Stint": [1.0, 2.0]})
@@ -122,6 +127,7 @@ def test_stint_labels_from_laps():
 
 
 def test_constraint_check():
+    # A rising curve passes; a falling one is flagged at the age of its minimum.
     assert not check_non_negative(lambda n: 0.07 * n, 40.0, 0.01).violated
     result = check_non_negative(lambda n: -0.05 * n, 40.0, 0.01)
     assert result.violated and result.age_of_minimum == 40.0
@@ -168,6 +174,7 @@ def test_polynomial_matches_full_dummy_variable_regression(degree):
 
 
 def test_polynomial_flags_negative_degradation():
+    # A falling fitted curve is flagged as negative degradation.
     ages, times, ids, _ = synthetic_stints(lambda n: -0.05 * n, n_stints=10)
     p = PolynomialDegradationModel("C3").fit(ages, times, ids).params()
     assert p["negative_degradation_flag"]
@@ -175,6 +182,7 @@ def test_polynomial_flags_negative_degradation():
 
 
 def test_polynomial_invalid_settings():
+    # Invalid degree, method or too few distinct ages are rejected.
     with pytest.raises(ValueError):
         PolynomialDegradationModel("C3", degree=0)
     with pytest.raises(ValueError):
@@ -199,6 +207,7 @@ def test_rk4_unit_response_matches_exact(b):
 
 @pytest.mark.parametrize("b", [-0.05, 0.0, 0.03])
 def test_rk45_unit_response_matches_exact(b):
+    # RK45 must match the closed-form unit response to its tolerance.
     g_rk45 = unit_response([3.0, 10.0, 25.0, 41.0], b, solver="rk45")
     np.testing.assert_allclose(g_rk45, exact_unit_response([3.0, 10.0, 25.0, 41.0], b), rtol=1e-8)
 
@@ -222,6 +231,7 @@ def test_exact_solution_satisfies_the_ode():
 
 
 def test_unit_response_rejects_bad_input():
+    # Fixed-step solvers need integer ages, known solver names and a finite b.
     with pytest.raises(ValueError, match="multiple"):
         unit_response([1.5], 0.02, solver="rk4")
     with pytest.raises(ValueError):
@@ -235,6 +245,7 @@ def test_unit_response_rejects_bad_input():
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("a, b", [(0.05, 0.03), (0.07, 0.0), (0.12, -0.03)])
 def test_wear_ode_recovers_parameters(a, b):
+    # The ODE fit recovers the true a and b to within 3 standard errors.
     ages, times, ids, _ = synthetic_stints(lambda n: exact_degradation(n, a, b), n_stints=60)
     p = WearODEModel("C3").fit(ages, times, ids).params()
     assert abs(p["a"] - a) <= 3 * p["standard_errors"][0]
@@ -244,6 +255,7 @@ def test_wear_ode_recovers_parameters(a, b):
 
 
 def test_wear_ode_noise_free_exact_recovery():
+    # Without noise the exact solver recovers a and b almost exactly.
     ages, times, ids, _ = synthetic_stints(lambda n: exact_degradation(n, 0.05, 0.03), noise=0.0)
     p = WearODEModel("C3", solver="exact").fit(ages, times, ids).params()
     assert p["a"] == pytest.approx(0.05, rel=1e-6)
@@ -258,6 +270,7 @@ def test_wear_ode_matches_scipy_least_squares_benchmark():
     stints = np.unique(ids)
 
     def residuals(theta):
+        # Residual of every lap for theta = (one offset per stint, a, b), for SciPy.
         offsets, a, b = theta[:-2], theta[-2], theta[-1]
         return offsets[np.searchsorted(stints, ids)] + exact_degradation(ages, a, b) - times
 
@@ -271,6 +284,7 @@ def test_wear_ode_matches_scipy_least_squares_benchmark():
 @pytest.mark.parametrize("root_finder", ["bisection", "secant", "newton"])
 @pytest.mark.parametrize("solver", ["rk4", "rk45", "exact"])
 def test_wear_ode_solvers_and_root_finders_agree(solver, root_finder):
+    # Every solver and root finder combination must give the same fit as the exact one.
     ages, times, ids, _ = synthetic_stints(lambda n: exact_degradation(n, 0.05, 0.03), n_stints=12)
     reference = WearODEModel("C3", solver="exact").fit(ages, times, ids).params()
     p = WearODEModel("C3", solver=solver, root_finder=root_finder).fit(ages, times, ids).params()
@@ -323,6 +337,7 @@ def test_bootstrap_is_reproducible_with_a_seed():
 
 
 def test_bootstrap_agrees_with_analytic_se_for_independent_noise():
+    # For independent noise the bootstrap SE must be close to the analytic SE.
     ages, times, ids, _ = synthetic_stints(lambda n: 0.07 * n, n_stints=40)
     model = PolynomialDegradationModel("C3").fit(ages, times, ids)
     ratio = model.bootstrap(200, seed=SEED).standard_errors[0] / model.params()["standard_errors"][0]
@@ -339,6 +354,7 @@ def test_bootstrap_exceeds_analytic_se_for_correlated_noise():
 
 
 def test_wear_ode_bootstrap_runs_and_brackets_estimate():
+    # The ODE bootstrap runs and its interval contains the fitted estimate.
     ages, times, ids, _ = synthetic_stints(lambda n: exact_degradation(n, 0.05, 0.03), n_stints=20)
     model = WearODEModel("C3").fit(ages, times, ids)
     result = model.bootstrap(20, seed=SEED)
@@ -382,6 +398,7 @@ def test_knn_distance_weighting_with_exact_match():
 
 
 def test_knn_regressor_invalid_inputs():
+    # Invalid k, weights and too-small training sets are rejected.
     with pytest.raises(ValueError):
         KNNRegressor(0)
     with pytest.raises(ValueError):
@@ -409,16 +426,19 @@ def test_knn_model_recovers_degradation_curve():
 
 
 def test_knn_model_flags_negative_degradation():
+    # A falling KNN curve is flagged as negative degradation.
     ages, times, ids, _ = synthetic_stints(lambda n: -0.05 * n, n_stints=10)
     assert KNNDegradationModel("C3", k=10).fit(ages, times, ids).params()["negative_degradation_flag"]
 
 
 def test_knn_model_rejects_k_larger_than_data():
+    # k cannot exceed the number of training laps.
     with pytest.raises(ValueError):
         KNNDegradationModel("C3", k=50).fit([1.0, 2.0, 3.0], [80.0, 80.1, 80.2])
 
 
 def test_prepare_stint_data_encodes_stints():
+    # Stints are numbered in sorted order and demean removes each stint's mean.
     data = prepare_stint_data([1, 2, 1], [80.0, 80.1, 81.0], ["b", "b", "a"])
     assert data.n_stints == 2
     assert data.stint_labels.tolist() == ["a", "b"]

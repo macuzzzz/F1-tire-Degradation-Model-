@@ -53,6 +53,7 @@ import sys
 import time
 from pathlib import Path
 
+# Make the package (src/) and the other scripts importable when this file is run directly.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
@@ -62,7 +63,9 @@ import pandas as pd  # noqa: E402
 from tyredeg.config import load_config  # noqa: E402
 from tyredeg.preparation import prepare_laps  # noqa: E402
 
+# Stage names in the order they must run (each may use the outputs of the ones before).
 STAGES = ("numerics", "data", "validate", "test", "strategy", "sensitivity", "audit", "benchmarks")
+# Output folders and the manifest that records the hash of every result file.
 REPORTS = REPO_ROOT / "reports"
 FIGURES = REPORTS / "figures"
 BENCHMARK_OUTPUT = REPORTS / "benchmarks_latest"
@@ -72,6 +75,7 @@ MANIFEST = REPORTS / "pipeline_manifest.json"
 NOT_HASHED_PREFIXES = ("pipeline_manifest", "pipeline.log", "test_runs.log", "phase8_", "test_report",
                        "coverage", "benchmarks_latest")
 
+# One logger for the pipeline's own messages.
 logger = logging.getLogger("pipeline")
 
 
@@ -83,6 +87,7 @@ TEXT_SUFFIXES = (".csv", ".json", ".yaml", ".yml", ".txt", ".log", ".md", ".html
 
 def sha256(path):
     """SHA-256 of a file's content; line endings do not count for text files."""
+    # Read the file; for text files ignore line-ending differences, then hash the bytes.
     data = Path(path).read_bytes()
     if Path(path).suffix.lower() in TEXT_SUFFIXES:
         data = data.replace(b"\r\n", b"\n")
@@ -91,6 +96,8 @@ def sha256(path):
 
 def result_hashes():
     """SHA-256 of every result file in reports/ (recursively), except NOT_HASHED_PREFIXES."""
+    # Hash every result file in reports/ except logs, the manifest and machine-dependent
+    # benchmarks.
     hashes = {}
     for path in sorted(REPORTS.rglob("*")):
         if path.is_file() and not path.name.startswith(NOT_HASHED_PREFIXES) \
@@ -101,16 +108,19 @@ def result_hashes():
 
 def ordered_stages(requested):
     """The requested stages in pipeline order (a stage needs the ones before it)."""
+    # Keep the requested stages but always in pipeline order.
     return [stage for stage in STAGES if stage in requested]
 
 
 def changed_results(previous_hashes, hashes):
     """Result files present in both runs whose SHA-256 differs (sorted names)."""
+    # Files present in both runs whose hash differs (new files are not counted as changes).
     return sorted(name for name, digest in hashes.items()
                   if name in previous_hashes and previous_hashes[name] != digest)
 
 
 def git_commit():
+    # Record which code version produced the results; "unknown" if git is not available.
     try:
         return subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True,
                               text=True, check=True).stdout.strip()
@@ -122,6 +132,7 @@ def git_commit():
 # Stages
 # ---------------------------------------------------------------------------
 def stage_numerics(config):
+    # Phase 3 study of the numerical methods (error vs step size, tolerances, stopping rules).
     import numerics_study
 
     numerics_study.main()
@@ -133,10 +144,12 @@ def stage_data(config):
     One column per race: the number of laps loaded, the laps removed by each
     cleaning rule (in the order they are applied, D17) and the clean laps kept.
     """
+    # For each race: load, fuel-correct and clean, and record the laps removed by each rule.
     columns = {}
     for race in config.races:
         prepared = prepare_laps(config, [race])
         report = prepared.cleaning_report.set_index("rule")
+        # Laps before cleaning, laps removed per rule, and clean laps kept.
         loaded = int(report.loc["input", "remaining"])
         removed = report["removed"].drop("input").astype(int)
         column = pd.concat([pd.Series({"laps loaded": loaded}), removed,
@@ -144,6 +157,7 @@ def stage_data(config):
         columns[f"{race.year} ({race.role})"] = column
         logger.info("%d %s: %d laps loaded -> %d clean laps", race.year, race.event, loaded,
                     len(prepared.clean))
+    # One column per race; save the table, then draw the data figures.
     table = pd.DataFrame(columns)
     table.index.name = "rule"
     table.to_csv(REPORTS / "pipeline_cleaning_report.csv")
@@ -156,11 +170,15 @@ def stage_data(config):
 def stage_validate(config):
     import compare_models
 
+    # Has the single test evaluation already been run?
     selection = REPO_ROOT / config.validation.selection_file
     tested = (REPO_ROOT / config.validation.test_results_file).exists()
+    # After the test: recompute the cross-validation and only check it matches the frozen
+    # selection.
     if selection.exists() and tested:
         logger.info("Test already evaluated: recomputing the CV and VERIFYING the frozen selection.")
         compare_models.run_cv(config, verify_only=True)
+    # Before the test: run the cross-validation and freeze the model selection.
     else:
         logger.info("No test evaluation yet: running the CV and writing the model selection.")
         compare_models.run_cv(config)
@@ -169,6 +187,7 @@ def stage_validate(config):
 def stage_test(config, force):
     import compare_models
 
+    # The test race is evaluated once; skip unless a forced (and logged) re-run is requested.
     if (REPO_ROOT / config.validation.test_results_file).exists() and not force:
         logger.info("The test race has already been evaluated once; reusing %s (use --force-test "
                     "to re-run; every run is logged).", config.validation.test_results_file)
@@ -177,24 +196,28 @@ def stage_test(config, force):
 
 
 def stage_strategy(config):
+    # Phase 6: build the race-time model and optimise the pit stops.
     import optimise_strategy
 
     optimise_strategy.main(config)
 
 
 def stage_sensitivity(config):
+    # Phase 7: one-at-a-time sensitivity, coefficients and break-even values.
     import sensitivity_analysis
 
     sensitivity_analysis.main(config)
 
 
 def stage_audit(config):
+    # Credibility audit: 2025 diagnosis, leakage and strategy checks (stops the run on a failure).
     import audit
 
     audit.main(config)
 
 
 def stage_benchmarks(config):
+    # Machine-dependent timings go to a separate, git-ignored folder.
     import benchmark
 
     benchmark.main(config, sections=["ode", "knn", "least_squares", "strategy", "profile"],
@@ -203,6 +226,7 @@ def stage_benchmarks(config):
 
 def figures_written_since(start_time):
     """Names of the figures (in reports/) modified since ``start_time`` (seconds since the epoch)."""
+    # Every PNG in reports/ written since the run started.
     return sorted(path.relative_to(REPORTS).as_posix() for path in REPORTS.rglob("*.png")
                   if path.stat().st_mtime >= start_time)
 
@@ -211,6 +235,7 @@ def figures_written_since(start_time):
 # Main
 # ---------------------------------------------------------------------------
 def parse_arguments(argv):
+    # Command-line options: config file, stages to run, forced test, log level and log file.
     parser = argparse.ArgumentParser(
         description="Run the F1 tyre-degradation workflow end to end (load -> clean -> fuel-correct "
                     "-> fit -> validate -> test -> optimise -> sensitivity).")
@@ -227,6 +252,7 @@ def parse_arguments(argv):
 
 
 def configure_logging(level, log_file):
+    # Log to the console and to a file, with time stamps.
     Path(log_file).parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=getattr(logging, level),
@@ -235,10 +261,12 @@ def configure_logging(level, log_file):
         force=True,
     )
     # FastF1 logs every cache access at INFO; keep only its warnings and errors.
+    # FastF1 logs every cache access; keep only its warnings.
     logging.getLogger("fastf1").setLevel(logging.WARNING)
 
 
 def main(argv=None):
+    # Read the options, set up logging and load (and validate) the configuration.
     args = parse_arguments(argv)
     configure_logging(args.log_level, args.log_file)
     config_path = Path(args.config).resolve()
@@ -246,15 +274,18 @@ def main(argv=None):
     stages = ordered_stages(args.stages)
     logger.info("Config %s (sha256 %s...), stages: %s", config_path.name, sha256(config_path)[:12],
                 ", ".join(stages))
+    # Read the previous manifest, if any, to compare results with the last run.
     REPORTS.mkdir(exist_ok=True)
     previous = json.loads(MANIFEST.read_text(encoding="utf-8")) if MANIFEST.exists() else None
 
+    # Map each stage name to the function that runs it.
     runners = {"numerics": stage_numerics, "data": stage_data, "validate": stage_validate,
                "test": lambda c: stage_test(c, args.force_test),
                "strategy": stage_strategy, "sensitivity": stage_sensitivity,
                "audit": stage_audit, "benchmarks": stage_benchmarks}
     run_start = time.time()
     durations = {}
+    # Run the requested stages in order and time each one.
     for stage in stages:
         logger.info("=== stage %s: start ===", stage)
         start = time.perf_counter()
@@ -262,9 +293,11 @@ def main(argv=None):
         durations[stage] = round(time.perf_counter() - start, 2)
         logger.info("=== stage %s: done in %.1f s ===", stage, durations[stage])
 
+    # List the figures this run produced.
     figures = figures_written_since(run_start)
     logger.info("%d figures written:\n  %s", len(figures), "\n  ".join(figures))
 
+    # Reproducibility check: with the same config, every result should be identical to last time.
     hashes = result_hashes()
     if previous is not None and previous.get("config_sha256") == sha256(config_path):
         changed = changed_results(previous["results_sha256"], hashes)
@@ -274,6 +307,7 @@ def main(argv=None):
         else:
             logger.info("Reproducibility check: all %d result files identical to the previous run.",
                         sum(name in previous["results_sha256"] for name in hashes))
+    # Write the new manifest: time, code version, config hash, stages, durations and result hashes.
     MANIFEST.write_text(json.dumps({
         "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "git_commit": git_commit(),

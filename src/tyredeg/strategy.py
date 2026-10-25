@@ -93,6 +93,7 @@ class CompoundModel:
     max_stint_laps: int
 
     def __post_init__(self):
+        # Validate the compound's data as soon as it is created: base time, stint limit and model.
         if not (np.isfinite(self.base_time) and self.base_time > 0):
             raise ValueError(f"base_time must be a positive number of seconds, got {self.base_time!r}.")
         if isinstance(self.max_stint_laps, bool) or not isinstance(self.max_stint_laps, (int, np.integer)) \
@@ -120,6 +121,7 @@ class LinearDegradation:
     """
 
     def __init__(self, rate):
+        # The wear rate must be a real number (booleans rejected).
         if isinstance(rate, bool) or not np.isfinite(rate):
             raise ValueError(f"rate must be a finite number, got {rate!r}.")
         self.rate = float(rate)
@@ -147,6 +149,7 @@ class LinearDegradation:
         >>> LinearDegradation(0.05).degradation([0.0, 20.0]).tolist()
         [0.0, 1.0]
         """
+        # Ages must be finite and non-negative; degradation grows linearly with age.
         ages = np.asarray(tyre_age, dtype=float).reshape(-1)
         if not np.all(np.isfinite(ages)) or np.any(ages < 0):
             raise ValueError("tyre_age must contain finite values >= 0 [laps].")
@@ -154,6 +157,7 @@ class LinearDegradation:
 
 
 def _check_int(value, name, minimum):
+    # Reject non-integers (and booleans), then enforce the lower bound.
     if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
         raise TypeError(f"{name} must be an integer, got {value!r}.")
     if value < minimum:
@@ -162,6 +166,7 @@ def _check_int(value, name, minimum):
 
 
 def _check_race_inputs(models, total_laps, pit_loss, k_fuel):
+    # Shared checks: compound models, race length >= 2, positive pit loss, k_fuel >= 0.
     if not isinstance(models, dict) or not models:
         raise TypeError("models must be a non-empty dict {compound: CompoundModel}.")
     total_laps = _check_int(total_laps, "total_laps", 2)
@@ -174,6 +179,7 @@ def _check_race_inputs(models, total_laps, pit_loss, k_fuel):
 
 def _check_compounds(compounds, models):
     """Each compound must be known; a dry race must use at least two different ones."""
+    # Every compound must have a model, and a dry race must use two different ones.
     for compound in compounds:
         if compound not in models:
             raise ValueError(f"Unknown compound {compound!r}; available: {sorted(models)}.")
@@ -218,12 +224,15 @@ def stint_time(compound_model, n_laps):
     >>> stint_time(CompoundModel("C3", Linear(), 80.0, 40), 3)   # 240 + 0.1 (1 + 2 + 3)
     240.6
     """
+    # Check the inputs; an empty stint costs nothing.
     if not isinstance(compound_model, CompoundModel):
         raise TypeError(f"compound_model must be a CompoundModel, got {type(compound_model).__name__}.")
     n_laps = _check_int(n_laps, "n_laps", 0)
     if n_laps == 0:
         return 0.0
+    # New tyres: the laps of the stint have tyre ages 1, 2, ..., n.
     ages = np.arange(1.0, n_laps + 1.0)
+    # Stint time = n x base lap time + the degradation accumulated over those laps.
     return float(n_laps * compound_model.base_time + np.sum(compound_model.model.degradation(ages)))
 
 
@@ -257,6 +266,7 @@ def fuel_effect_total(total_laps, k_fuel):
     >>> fuel_effect_total(70, 0.046)   # 0.046 * 70 * 69 / 2
     111.09
     """
+    # Check the inputs, then sum k_fuel x (n - 1) over all laps n = 1..N.
     total_laps = _check_int(total_laps, "total_laps", 1)
     if isinstance(k_fuel, bool) or not np.isfinite(k_fuel) or k_fuel < 0:
         raise ValueError(f"k_fuel must be a finite number >= 0, got {k_fuel!r}.")
@@ -297,18 +307,22 @@ def total_race_time(compounds, stint_lengths, models, pit_loss, k_fuel=0.0, add_
     -------
     >>> # see race_time for the one-stop case
     """
+    # One compound per stint, at least two stints; the race length is the sum of the stints.
     if len(compounds) != len(stint_lengths) or len(compounds) < 2:
         raise ValueError("Need one compound per stint and at least two stints.")
     total_laps = int(np.sum([_check_int(n, "stint length", 1) for n in stint_lengths]))
     _check_race_inputs(models, total_laps, pit_loss, k_fuel)
     _check_compounds(compounds, models)
+    # Add up each stint's time, refusing stints longer than the data support (no extrapolation).
     time = 0.0
     for compound, laps in zip(compounds, stint_lengths):
         if enforce_max_stint and laps > models[compound].max_stint_laps:
             raise ValueError(f"A {laps}-lap stint on {compound} exceeds its limit of "
                              f"{models[compound].max_stint_laps} laps (no extrapolation, D63).")
         time += stint_time(models[compound], laps)
+    # One pit loss per stop (stints - 1 stops).
     time += pit_loss * (len(stint_lengths) - 1)
+    # Corrected times are at full fuel; subtract the fuel saved to get the real race time.
     if add_fuel_effect:
         time -= fuel_effect_total(total_laps, k_fuel)
     return time
@@ -361,12 +375,14 @@ def race_time(pit_lap, compound_1, compound_2, models, total_laps, pit_loss, k_f
     >>> race_time(2, "C3", "C4", models, 4, pit_loss=20.0)   # 2 x (160 + 0.3) + 20
     340.6
     """
+    # Check the inputs: the pit lap must leave laps for the second stint, on a different compound.
     total_laps = _check_race_inputs(models, total_laps, pit_loss, k_fuel)
     pit_lap = _check_int(pit_lap, "pit_lap", 1)
     if pit_lap >= total_laps:
         raise ValueError(f"pit_lap must be < total_laps ({total_laps}), got {pit_lap}.")
     if compound_1 == compound_2:
         raise ValueError(f"The two stints must use different compounds, got {compound_1} twice.")
+    # A one-stop race is two stints: laps 1..pit_lap and the rest.
     return total_race_time((compound_1, compound_2), (pit_lap, total_laps - pit_lap), models,
                            pit_loss, k_fuel, add_fuel_effect, enforce_max_stint)
 
@@ -376,6 +392,7 @@ def race_time(pit_lap, compound_1, compound_2, models, total_laps, pit_loss, k_f
 # ---------------------------------------------------------------------------
 def _poly_antiderivative(coefficients, x):
     """D(x) = sum_k c_k x^(k+1) / (k+1) for d(x) = sum_k c_k x^k, k = 1..p."""
+    # Integral of sum_k c_k x^k from 0 to x = sum_k c_k x^(k+1) / (k + 1).
     value = 0.0
     for power, coefficient in enumerate(coefficients, start=1):
         value += coefficient * x ** (power + 1) / (power + 1)
@@ -388,8 +405,10 @@ def _ode_antiderivative(a, b, x):
     For |b x| < 1e-4 the series a (x^2/2 + b x^3/6 + b^2 x^4/24) is used,
     because expm1(b x) - b x loses digits to cancellation there.
     """
+    # For tiny b*x use the Taylor series, which avoids cancellation in expm1(bx) - bx.
     if abs(b * x) < 1e-4:
         return a * (x**2 / 2.0 + b * x**3 / 6.0 + b**2 * x**4 / 24.0)
+    # Integral of a (e^(bx) - 1)/b from 0 to x.
     return a * (np.expm1(b * x) - b * x) / b**2
 
 
@@ -425,11 +444,14 @@ def cumulative_degradation(model, n_laps):
     >>> round(cumulative_degradation(model, 3.0), 9)   # 0.1 + 0.2 + 0.3
     0.6
     """
+    # A stint of 0 laps has no degradation.
     if not n_laps >= 0:
         raise ValueError(f"n_laps must be >= 0, got {n_laps}.")
     if n_laps == 0:
         return 0.0
+    # Midpoint rule: the sum d(1) + ... + d(n) is replaced by the integral from 0.5 to n + 0.5.
     upper, lower = n_laps + 0.5, 0.5
+    # Use each model's closed-form integral; KNN has none.
     if isinstance(model, PolynomialDegradationModel):
         coefficients = model.params()["coefficients"]
         return float(_poly_antiderivative(coefficients, upper) - _poly_antiderivative(coefficients, lower))
@@ -487,15 +509,18 @@ def race_time_continuous(pit_lap, compound_1, compound_2, models, total_laps, pi
     >>> round(race_time_continuous(32.5, "C3", "C4", models, 70, 20.9, 0.046), 6)
     5928.425625
     """
+    # Check the inputs; the pit lap may be any real number inside the race.
     total_laps = _check_race_inputs(models, total_laps, pit_loss, k_fuel)
     _check_compounds((compound_1, compound_2), models)
     if not 0 < pit_lap < total_laps:
         raise ValueError(f"pit_lap must lie in (0, {total_laps}), got {pit_lap}.")
+    # Same as the integer race time, but the stint sums are smooth integrals of d.
     first, second = models[compound_1], models[compound_2]
     second_laps = total_laps - pit_lap
     time = (pit_lap * first.base_time + cumulative_degradation(first.model, pit_lap)
             + second_laps * second.base_time + cumulative_degradation(second.model, second_laps)
             + pit_loss)
+    # Subtract the fuel saved, as in the integer race time.
     if add_fuel_effect:
         time -= fuel_effect_total(total_laps, k_fuel)
     return time
@@ -587,12 +612,15 @@ def feasible_pit_laps(compound_1, compound_2, models, total_laps):
     >>> feasible_pit_laps("C3", "C4", models, 70).tolist()   # C3 <= 40 laps, C4 <= 35 laps
     [35, 36, 37, 38, 39, 40]
     """
+    # Validate the models, race length and compounds.
     if not isinstance(models, dict) or not models:
         raise TypeError("models must be a non-empty dict {compound: CompoundModel}.")
     total_laps = _check_int(total_laps, "total_laps", 2)
     for compound in (compound_1, compound_2):
         if compound not in models:
             raise ValueError(f"Unknown compound {compound!r}; available: {sorted(models)}.")
+    # Earliest pit lap: the second stint must fit its limit. Latest: the first stint must fit its
+    # own.
     low = max(1, total_laps - models[compound_2].max_stint_laps)
     high = min(total_laps - 1, models[compound_1].max_stint_laps)
     return np.arange(low, high + 1)
@@ -635,11 +663,13 @@ def optimise_brute_force(compound_1, compound_2, models, total_laps, pit_loss, k
     >>> result.pit_laps, round(result.total_time, 6), result.iterations
     ((35,), 5928.76, 6)
     """
+    # Check the inputs and list every pit lap that respects both stint limits.
     total_laps = _check_race_inputs(models, total_laps, pit_loss, k_fuel)
     _check_compounds((compound_1, compound_2), models)
     candidates = feasible_pit_laps(compound_1, compound_2, models, total_laps)
     if candidates.size == 0:
         raise ValueError(f"No feasible one-stop race {compound_1}->{compound_2} within the stint limits.")
+    # Evaluate the exact race time at every candidate and keep the fastest (the reference method).
     times = [race_time(int(lap), compound_1, compound_2, models, total_laps, pit_loss, k_fuel,
                        add_fuel_effect) for lap in candidates]
     best = int(np.argmin(times))
@@ -694,6 +724,7 @@ def optimise_continuous(compound_1, compound_2, models, total_laps, pit_loss, k_
     -------
     >>> optimise_continuous("C3", "C4", models, 70, 20.9, 0.046, root_finder="newton")  # doctest: +SKIP
     """
+    # Check the inputs and find the feasible pit-lap window.
     if root_finder not in VALID_ROOT_FINDERS:
         raise ValueError(f"root_finder must be one of {VALID_ROOT_FINDERS}, got {root_finder!r}.")
     total_laps = _check_race_inputs(models, total_laps, pit_loss, k_fuel)
@@ -701,18 +732,23 @@ def optimise_continuous(compound_1, compound_2, models, total_laps, pit_loss, k_
     window = feasible_pit_laps(compound_1, compound_2, models, total_laps)
     if window.size == 0:
         raise ValueError(f"No feasible one-stop race {compound_1}->{compound_2} within the stint limits.")
+    # Count evaluations of the smooth and the exact race time separately.
     calls = {"continuous": 0, "integer": 0}
 
+    # The relaxed race time T(L) with a real pit lap L.
     def relaxed(pit_lap):
         calls["continuous"] += 1
         return race_time_continuous(pit_lap, compound_1, compound_2, models, total_laps, pit_loss,
                                     k_fuel, add_fuel_effect)
 
+    # Its slope dT/dL by central difference; the optimum is where the slope is zero.
     def slope(pit_lap):
         return central_difference(relaxed, pit_lap)
 
+    # Find the root of the slope with the chosen root finder.
     note, root, iterations = "", None, 0
     try:
+        # Secant starts from the two ends of the window (widened if the window is a single lap).
         if root_finder == "secant":
             low, high = float(window[0]), float(window[-1])
             if low == high:
@@ -720,26 +756,34 @@ def optimise_continuous(compound_1, compound_2, models, total_laps, pit_loss, k_
             result = secant(slope, low, high, xtol=xtol, ftol=ftol,
                             divergence_limit=float(total_laps))
         else:
+            # Newton uses the second difference as the derivative of the slope, starting mid-
+            # window.
             result = newton(slope, lambda x: central_second_difference(relaxed, x),
                             float(window[0] + window[-1]) / 2.0, xtol=xtol, ftol=ftol,
                             divergence_limit=float(total_laps))
         root, iterations = float(result.root), result.iterations
+    # If root finding fails, fall back to comparing the two ends of the window.
     except (ZeroDerivativeError, DivergenceError, NotConvergedError, ValueError) as error:
         note = f"root finding failed ({type(error).__name__}); window ends compared instead"
 
+    # Candidates: the window ends if no usable root, else the integers around the root, kept in the
+    # window.
     if root is None or not 0 < root < total_laps:
         candidates = {int(window[0]), int(window[-1])}
     else:
         nearby = range(int(np.floor(root)) - 1, int(np.ceil(root)) + 2)
         candidates = {int(np.clip(lap, window[0], window[-1])) for lap in nearby}
 
+    # Exact integer race time, counted separately.
     def exact(lap):
         calls["integer"] += 1
         return race_time(lap, compound_1, compound_2, models, total_laps, pit_loss, k_fuel,
                          add_fuel_effect)
 
+    # Evaluate the candidates exactly and keep the fastest.
     times = {lap: exact(lap) for lap in sorted(candidates)}
     pit_lap = min(times, key=times.get)
+    # The stint limits are active if the relaxed optimum lies outside the feasible window.
     constraint_active = root is not None and not window[0] - 0.5 <= root <= window[-1] + 0.5
     return StrategyResult(
         compounds=(compound_1, compound_2), method=root_finder, pit_laps=(pit_lap,),
@@ -774,14 +818,17 @@ def optimise_two_stop(compounds, models, total_laps, pit_loss, k_fuel=0.0, add_f
     -------
     >>> optimise_two_stop(("C3", "C4", "C3"), models, 70, 20.9, 0.046)  # doctest: +SKIP
     """
+    # Three stints with valid compounds and race inputs.
     if len(compounds) != 3:
         raise ValueError("A two-stop race has exactly three stints.")
     total_laps = _check_race_inputs(models, total_laps, pit_loss, k_fuel)
     _check_compounds(compounds, models)
     # Stint sums for every possible stint length, computed once per compound.
+    # Precompute every stint time once per compound, so each combination is just three lookups.
     sums = {c: [stint_time(models[c], n) for n in range(total_laps + 1)] for c in set(compounds)}
     limits = [models[c].max_stint_laps for c in compounds]
     best, evaluations = None, 0
+    # Try every split into three stints that respects all three stint limits.
     for first in range(1, min(limits[0], total_laps - 2) + 1):
         for second in range(1, min(limits[1], total_laps - first - 1) + 1):
             third = total_laps - first - second
@@ -791,8 +838,10 @@ def optimise_two_stop(compounds, models, total_laps, pit_loss, k_fuel=0.0, add_f
             time = sums[compounds[0]][first] + sums[compounds[1]][second] + sums[compounds[2]][third]
             if best is None or time < best[0]:
                 best = (time, first, second, third)
+    # No combination fits the limits.
     if best is None:
         raise ValueError(f"No feasible two-stop race {'->'.join(compounds)} within the stint limits.")
+    # Add the two pit losses and subtract the fuel saved.
     time, first, second, third = best
     time += 2 * pit_loss
     if add_fuel_effect:
@@ -847,6 +896,7 @@ def compare_strategies(models, total_laps, pit_loss, k_fuel=0.0, add_fuel_effect
     >>> ranking[["strategy", "pit_laps"]].head(2).values.tolist()
     [['C3 -> C4 -> C4', '21 & 45'], ['C4 -> C4 -> C3', '24 & 49']]
     """
+    # Every one-stop order, solved by brute force and by both continuous methods where possible.
     rows = []
     compounds = sorted(models)
     for first, second in itertools.permutations(compounds, 2):
@@ -858,6 +908,7 @@ def compare_strategies(models, total_laps, pit_loss, k_fuel=0.0, add_fuel_effect
             except TypeError:
                 pass  # no closed-form integral (KNN): brute force only
         rows += [_result_row(result, "1-stop") for result in results]
+    # Every three-stint sequence that uses at least two compounds.
     if include_two_stop:
         for sequence in itertools.product(compounds, repeat=3):
             if len(set(sequence)) < 2:
@@ -867,6 +918,7 @@ def compare_strategies(models, total_laps, pit_loss, k_fuel=0.0, add_fuel_effect
             except ValueError:
                 continue  # no feasible combination within the stint limits
             rows.append(_result_row(result, "2-stop"))
+    # One row per strategy and method; the ranking keeps each strategy's best time, fastest first.
     methods = pd.DataFrame(rows)
     ranking = methods.loc[methods.groupby("strategy")["total_time"].idxmin()]
     ranking = ranking.sort_values("total_time").reset_index(drop=True)
@@ -876,6 +928,7 @@ def compare_strategies(models, total_laps, pit_loss, k_fuel=0.0, add_fuel_effect
 
 
 def _result_row(result, kind):
+    # One row of the strategy table, with pit laps and stint lengths written as text.
     return {
         "strategy": " -> ".join(result.compounds), "stops": kind, "method": result.method,
         "pit_laps": " & ".join(str(lap) for lap in result.pit_laps),
@@ -917,14 +970,17 @@ def max_stint_from_data(tyre_age, min_laps):
     >>> max_stint_from_data([1, 1, 2, 2, 3], min_laps=2)
     2
     """
+    # Validate the ages and the minimum lap count.
     ages = np.asarray(tyre_age, dtype=float).reshape(-1)
     if ages.size == 0 or not np.all(np.isfinite(ages)) or np.any(ages < 0):
         raise ValueError("tyre_age must be a non-empty array of finite ages >= 0 [laps].")
     _check_int(min_laps, "min_laps", 1)
+    # Count the laps at each tyre age and keep the ages seen at least min_laps times.
     values, counts = np.unique(ages, return_counts=True)
     supported = values[counts >= min_laps]
     if supported.size == 0:
         raise ValueError(f"No tyre age has {min_laps} or more laps.")
+    # The stint limit is the oldest such age.
     return int(np.floor(supported.max()))
 
 
@@ -963,6 +1019,7 @@ def compound_pace_delta(offsets, reference, other):
     >>> compound_pace_delta(df, "C3", "C4")["delta"]   # orders: +0.3 and -0.4 -> -0.05
     -0.05
     """
+    # Compare the two compounds within the same driver and race (same car), split by stint order.
     differences = {"other_first": [], "reference_first": []}
     for _, group in offsets.groupby(["race", "driver"]):
         ref = group[group["compound"] == reference]
@@ -970,12 +1027,15 @@ def compound_pace_delta(offsets, reference, other):
         if ref.empty or oth.empty:
             continue
         # The first stint of each compound represents it for this driver-race.
+        # Use each compound's first stint and record which compound ran first.
         ref_row = ref.sort_values("stint").iloc[0]
         oth_row = oth.sort_values("stint").iloc[0]
         key = "other_first" if oth_row["stint"] < ref_row["stint"] else "reference_first"
         differences[key].append(oth_row["offset"] - ref_row["offset"])
+    # Both orders are needed, because each order alone is biased (fuel load, track evolution).
     if not differences["other_first"] or not differences["reference_first"]:
         raise ValueError("Both stint orders are needed for the order-balanced estimate.")
+    # Average the medians of the two orders so the order effect cancels.
     first = float(np.median(differences["other_first"]))
     second = float(np.median(differences["reference_first"]))
     return {"delta": round((first + second) / 2.0, 12), "median_other_first": first,
@@ -1024,6 +1084,7 @@ class StrategyInputs:
 
 def _offsets_table(model, compound):
     """One row per stint: race, driver, stint number, compound, offset [s]."""
+    # Turn the model's "race|driver|stint" offsets into a table with separate columns.
     rows = []
     for label, offset in model.stint_offsets().items():
         race, driver, stint = label.split("|")
@@ -1068,6 +1129,7 @@ def refuel(laps, k_fuel):
     """
     from tyredeg.fuel_correction import add_fuel_corrected_times
 
+    # Recompute the fuel-corrected time for another k_fuel (cleaning does not depend on it).
     if not isinstance(laps, pd.DataFrame):
         raise TypeError(f"laps must be a DataFrame, got {type(laps).__name__}.")
     return add_fuel_corrected_times(laps.drop(columns=["FuelCorrectedTime"], errors="ignore"), k_fuel)
@@ -1111,12 +1173,16 @@ def build_strategy_inputs(all_laps, clean, config, model_names, k_fuel=None, min
     from tyredeg.fuel_correction import estimate_pit_loss
     from tyredeg.validation import candidate_models, fit_on
 
+    # Use the config's fuel coefficient and stint-limit rule unless overridden (sensitivity
+    # analysis).
     strategy = config.strategy
     k_fuel = config.k_fuel if k_fuel is None else float(k_fuel)
     min_laps = strategy.min_laps_at_max_age if min_laps_at_max_age is None else min_laps_at_max_age
+    # A different k_fuel means every corrected lap time has to be recomputed.
     if k_fuel != config.k_fuel:
         all_laps, clean = refuel(all_laps, k_fuel), refuel(clean, k_fuel)
 
+    # For each compound: fit the selected model, collect stint offsets and set the stint limit.
     fitted, offsets, limits, info = {}, [], {}, []
     for compound in strategy.compounds:
         laps = clean[clean["PirelliCompound"] == compound]
@@ -1133,12 +1199,14 @@ def build_strategy_inputs(all_laps, clean, config, model_names, k_fuel=None, min
                      "max_observed_age": float(laps["TyreLife"].max()), "rate_s_per_lap": rate})
     offsets = pd.concat(offsets, ignore_index=True)
 
+    # Base pace: the reference compound's median offset; others add their order-balanced delta.
     reference = strategy.compounds[0]
     bases, deltas = {reference: fitted[reference].base_time}, {}
     for compound in strategy.compounds[1:]:
         deltas[compound] = compound_pace_delta(offsets, reference, compound)
         bases[compound] = bases[reference] + deltas[compound]["delta"]
 
+    # Pit loss: an explicit override, the config override, or the median estimated from the data.
     if pit_loss_override is not None:
         pit_loss, pit_info = float(pit_loss_override), {"source": "override"}
     elif config.pit_loss_override is not None:
@@ -1149,6 +1217,7 @@ def build_strategy_inputs(all_laps, clean, config, model_names, k_fuel=None, min
         pit_info = {"source": "data (median)", "q25": estimate.q25_s, "q75": estimate.q75_s,
                     "n_stops": estimate.n_stops}
 
+    # Race length: the override, or the common length of the races used.
     lengths = clean.groupby("RaceId")["TotalLaps"].first().unique()
     if config.total_laps_override is not None:
         total_laps = config.total_laps_override
@@ -1157,6 +1226,7 @@ def build_strategy_inputs(all_laps, clean, config, model_names, k_fuel=None, min
     else:
         raise ValueError(f"Races differ in length {lengths}; set race.total_laps_override.")
 
+    # Bundle everything the optimisers need.
     models = {c: CompoundModel(c, fitted[c], bases[c], limits[c]) for c in strategy.compounds}
     info = pd.DataFrame(info).assign(base_time_s=[bases[c] for c in strategy.compounds])
     return StrategyInputs(models, total_laps, pit_loss, pit_info, deltas, info, k_fuel)

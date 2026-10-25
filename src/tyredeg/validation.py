@@ -53,6 +53,7 @@ BASELINE_NAME = "baseline (no degradation)"
 # ---------------------------------------------------------------------------
 def _errors(actual, predicted):
     """Return (actual, predicted) as checked float arrays."""
+    # Turn both inputs into 1-D float arrays and check they are non-empty, equal-length and finite.
     actual = np.asarray(actual, dtype=float).reshape(-1)
     predicted = np.asarray(predicted, dtype=float).reshape(-1)
     if actual.size == 0:
@@ -92,6 +93,7 @@ def rmse(actual, predicted):
     >>> round(rmse([1, 2, 3, 4], [1, 3, 2, 6]), 6)
     1.224745
     """
+    # Check the inputs, then the root of the mean squared error.
     actual, predicted = _errors(actual, predicted)
     return float(np.sqrt(np.mean((predicted - actual) ** 2)))
 
@@ -121,6 +123,7 @@ def mae(actual, predicted):
     >>> mae([1, 2, 3, 4], [1, 3, 2, 6])
     1.0
     """
+    # Check the inputs, then the average size of the errors (ignoring sign).
     actual, predicted = _errors(actual, predicted)
     return float(np.mean(np.abs(predicted - actual)))
 
@@ -150,6 +153,7 @@ def max_abs_error(actual, predicted):
     >>> max_abs_error([1, 2, 3, 4], [1, 3, 2, 6])
     2.0
     """
+    # Check the inputs, then the single worst error.
     actual, predicted = _errors(actual, predicted)
     return float(np.max(np.abs(predicted - actual)))
 
@@ -182,6 +186,7 @@ def bias(actual, predicted):
     >>> bias([1, 2, 3, 4], [1, 3, 2, 6])
     0.5
     """
+    # Check the inputs, then the average signed error (positive = predicted too slow).
     actual, predicted = _errors(actual, predicted)
     return float(np.mean(predicted - actual))
 
@@ -215,10 +220,13 @@ def r_squared(actual, predicted):
     >>> round(r_squared([1, 2, 3, 4], [1, 3, 2, 6]), 6)
     -0.2
     """
+    # Total variation of the actual values around their mean.
     actual, predicted = _errors(actual, predicted)
     total = float(np.sum((actual - actual.mean()) ** 2))
+    # A constant series has no variation to explain, so R^2 is undefined.
     if total == 0.0:
         return float("nan")
+    # Fraction of the variation explained: 1 - (error variation / total variation).
     return 1.0 - float(np.sum((predicted - actual) ** 2)) / total
 
 
@@ -247,6 +255,7 @@ def compute_metrics(actual, predicted):
     >>> compute_metrics([1, 2], [1, 2])["rmse"]
     0.0
     """
+    # All five metrics plus the number of laps scored.
     return {
         "rmse": rmse(actual, predicted),
         "mae": mae(actual, predicted),
@@ -290,6 +299,7 @@ class Fold:
     test_races: tuple
 
     def __post_init__(self):
+        # No race may be in both sets, and both sets must be non-empty.
         overlap = set(self.train_races) & set(self.test_races)
         if overlap:
             raise ValueError(f"A race cannot be in both train and test: {sorted(overlap)}.")
@@ -320,6 +330,7 @@ def leave_one_race_out(race_ids):
     >>> [fold.test_races for fold in leave_one_race_out(["r1", "r2", "r1", "r3"])]
     [('r1',), ('r2',), ('r3',)]
     """
+    # Every distinct race becomes the held-out race once; all the others are training.
     races = sorted(set(race_ids))
     if len(races) < 2:
         raise ValueError("Leave-one-race-out needs at least 2 races.")
@@ -351,6 +362,7 @@ def holdout_split(race_ids, test_races):
     >>> holdout_split(["r1", "r2", "r3"], ["r3"])
     Fold(train_races=('r1', 'r2'), test_races=('r3',))
     """
+    # Train on everything except the requested test races, which must exist in the data.
     races = sorted(set(race_ids))
     test = tuple(sorted(set(test_races)))
     unknown = set(test) - set(races)
@@ -390,14 +402,17 @@ def fold_masks(laps, fold, race_column=RACE_COLUMN):
     >>> [m.tolist() for m in fold_masks(laps, Fold(("r1",), ("r2",)))]
     [[True, False], [False, True]]
     """
+    # Validate the table, the fold and the race column.
     if not isinstance(laps, pd.DataFrame):
         raise TypeError(f"laps must be a DataFrame, got {type(laps).__name__}.")
     if not isinstance(fold, Fold):
         raise TypeError(f"fold must be a Fold, got {type(fold).__name__}.")
     if race_column not in laps.columns:
         raise ValueError(f"laps has no {race_column!r} column.")
+    # Select the laps of the training races and of the test races.
     train = laps[race_column].isin(fold.train_races).to_numpy()
     test = laps[race_column].isin(fold.test_races).to_numpy()
+    # Safety check: the two sets must never overlap.
     if np.any(train & test):
         raise ValueError("A lap is in both the training and the test set.")
     return train, test
@@ -410,6 +425,7 @@ class _ZeroDegradation:
     """The baseline (D50): constant pace, d(n) = 0 for every tyre age."""
 
     def degradation(self, tyre_age):
+        # Baseline model: no degradation at any tyre age.
         return np.zeros(np.asarray(tyre_age, dtype=float).reshape(-1).size)
 
 
@@ -474,16 +490,20 @@ def candidate_models(compound, models):
     >>> len(specs), specs[0].name
     (17, 'baseline (no degradation)')
     """
+    # The baseline is always the first candidate.
     check_compound(compound)
     specs = [ModelSpec(BASELINE_NAME, "baseline", 0, 0, lambda a, t, s: _ZeroDegradation())]
+    # One polynomial per candidate degree (degree d binds d into the lambda).
     for degree in models.candidate_degrees:
         specs.append(ModelSpec(
             f"polynomial degree {degree}", "polynomial", degree, 0,
             lambda a, t, s, d=degree: PolynomialDegradationModel(compound, degree=d).fit(a, t, s)))
+    # One wear-ODE model with the configured solver and b bracket.
     specs.append(ModelSpec(
         "wear ODE", "wear_ode", 2, 0,
         lambda a, t, s: WearODEModel(compound, solver=models.ode_solver,
                                      b_bracket=models.b_bracket).fit(a, t, s)))
+    # One KNN model per (weighting, k) pair; k is also the minimum number of training laps.
     for weights in models.candidate_weights:
         for k in models.candidate_k:
             specs.append(ModelSpec(
@@ -535,30 +555,38 @@ def predict_held_out(model, laps, anchor_laps):
     same order; :func:`predict_held_out_loop` keeps the original for the
     equivalence test and the before/after benchmark.
     """
+    # anchor_laps must be a whole number >= 1.
     if isinstance(anchor_laps, bool) or not isinstance(anchor_laps, (int, np.integer)) or anchor_laps < 1:
         raise ValueError(f"anchor_laps must be an integer >= 1, got {anchor_laps!r}.")
+    # Order laps by stint and lap number so the first laps of each stint come first.
     ordered = laps.sort_values([STINT_COLUMN, LAP_COLUMN], kind="stable").reset_index(drop=True)
     # Position of each lap within its stint: 0, 1, 2, ... (laps are sorted).
+    # Position of each lap within its stint; the first anchor_laps laps set the stint's base pace.
     position = ordered.groupby(STINT_COLUMN, sort=False).cumcount().to_numpy()
     is_anchor = position < anchor_laps
+    # Give each stint an integer index and evaluate the model once for all laps (vectorised).
     _, stint_index = np.unique(ordered[STINT_COLUMN].to_numpy(), return_inverse=True)
     ages = ordered[AGE_COLUMN].to_numpy(float)
     actual_all = ordered[TIME_COLUMN].to_numpy(float)
     degradation = np.asarray(model.degradation(ages), dtype=float)
 
     # Offset of each stint = mean over its anchor laps of (lap time - d(age)).
+    # Offset per stint = mean of (lap time - degradation) over its anchor laps.
     n_stints = int(stint_index.max()) + 1
     anchor_sums = np.bincount(stint_index[is_anchor], weights=(actual_all - degradation)[is_anchor],
                               minlength=n_stints)
     anchor_counts = np.bincount(stint_index[is_anchor], minlength=n_stints)
     offsets = anchor_sums / anchor_counts
 
+    # Score only the laps after the anchor laps; at least one must remain.
     scored = ~is_anchor
     if not np.any(scored):
         raise ValueError(f"No stint has more than {anchor_laps} laps; nothing to score.")
+    # Prediction = stint offset + degradation at that lap's tyre age.
     predicted = offsets[stint_index[scored]] + degradation[scored]
     actual = actual_all[scored]
     rest = ordered[scored]
+    # One row per scored lap with the actual and predicted times.
     return pd.DataFrame({
         RACE_COLUMN: rest[RACE_COLUMN].to_numpy(), STINT_COLUMN: rest[STINT_COLUMN].to_numpy(),
         LAP_COLUMN: rest[LAP_COLUMN].to_numpy(float), AGE_COLUMN: ages[scored],
@@ -605,14 +633,18 @@ def predict_held_out_loop(model, laps, anchor_laps):
     >>> scored[["actual", "predicted"]].round(6).values.tolist()
     [[80.5, 80.4]]
     """
+    # anchor_laps must be a whole number >= 1.
     if isinstance(anchor_laps, bool) or not isinstance(anchor_laps, (int, np.integer)) or anchor_laps < 1:
         raise ValueError(f"anchor_laps must be an integer >= 1, got {anchor_laps!r}.")
+    # Same calculation as predict_held_out, one stint at a time (kept as the reference).
     pieces = []
     ordered = laps.sort_values([STINT_COLUMN, LAP_COLUMN], kind="stable")
     for _, stint in ordered.groupby(STINT_COLUMN, sort=False):
+        # Split each stint into its anchor laps and the laps to score.
         anchor, rest = stint.iloc[:anchor_laps], stint.iloc[anchor_laps:]
         if rest.empty:
             continue
+        # Offset from the anchor laps, then predict the remaining laps.
         anchor_age = anchor[AGE_COLUMN].to_numpy(float)
         offset = float(np.mean(anchor[TIME_COLUMN].to_numpy(float) - model.degradation(anchor_age)))
         predicted = offset + model.degradation(rest[AGE_COLUMN].to_numpy(float))
@@ -660,6 +692,7 @@ def fit_on(spec, laps):
     ('polynomial degree 1', [1.0])
     """
     # Any object with a callable ``fit`` works (the tests use a recording stand-in).
+    # Validate the candidate and the columns it needs.
     if not callable(getattr(spec, "fit", None)):
         raise TypeError(f"spec must be a ModelSpec (with a callable fit), got {type(spec).__name__}.")
     if not isinstance(laps, pd.DataFrame):
@@ -667,6 +700,7 @@ def fit_on(spec, laps):
     missing = [column for column in (AGE_COLUMN, TIME_COLUMN, STINT_COLUMN) if column not in laps.columns]
     if missing:
         raise ValueError(f"laps is missing columns: {missing}")
+    # Fit on tyre age, fuel-corrected lap time and stint id.
     return spec.fit(laps[AGE_COLUMN].to_numpy(float), laps[TIME_COLUMN].to_numpy(float),
                     laps[STINT_COLUMN].to_numpy())
 
@@ -713,26 +747,31 @@ def cross_validate(laps, spec, folds, anchor_laps, implementation="vectorised"):
     >>> table[["test_race", "rmse"]].round(6).values.tolist()
     [['r1', 0.019808], ['r2', 0.019808], ['r3', 0.019808]]
     """
+    # Need at least one fold and a known implementation of the prediction step.
     if len(folds) == 0:
         raise ValueError("folds must contain at least one Fold.")
     predictors = {"vectorised": predict_held_out, "loop": predict_held_out_loop}
     if implementation not in predictors:
         raise ValueError(f"implementation must be one of {sorted(predictors)}, got {implementation!r}.")
     predictor = predictors[implementation]
+    # For each fold: fit on the training races, predict the held-out race, score it.
     rows, predictions = [], []
     for number, fold in enumerate(folds):
         train_mask, test_mask = fold_masks(laps, fold)
         train, test = laps[train_mask], laps[test_mask]
         row = {"model": spec.name, "family": spec.family, "fold": number,
                "test_race": ",".join(fold.test_races)}
+        # KNN needs at least k training laps; otherwise the candidate does not apply to this fold.
         if len(train) < spec.min_training_laps:
             rows.append({**row, "applicable": False})
             continue
+        # Fit, predict the held-out laps and compute the metrics.
         scored = predictor(fit_on(spec, train), test, anchor_laps)
         scored["fold"] = number
         predictions.append(scored)
         rows.append({**row, "applicable": True,
                      **compute_metrics(scored["actual"], scored["predicted"])})
+    # All predictions together (for residual analysis) and one metrics row per fold.
     combined = pd.concat(predictions, ignore_index=True) if predictions else pd.DataFrame()
     return pd.DataFrame(rows), combined
 
@@ -776,6 +815,7 @@ def summarize_folds(fold_table, max_abs_bias):
     >>> summary[["model", "beats_baseline_all_folds", "bias_ok"]].values.tolist()
     [['baseline (no degradation)', False, False], ['polynomial degree 1', True, True]]
     """
+    # Validate the table: required columns, a baseline to compare with, a valid bias limit.
     if not isinstance(fold_table, pd.DataFrame):
         raise TypeError(f"fold_table must be a DataFrame, got {type(fold_table).__name__}.")
     required = ("model", "family", "fold", "applicable", "rmse", "mae", "max_abs_error", "r_squared", "bias")
@@ -786,10 +826,13 @@ def summarize_folds(fold_table, max_abs_bias):
         raise ValueError(f"fold_table has no {BASELINE_NAME!r} rows; every candidate is compared with it.")
     if not max_abs_bias >= 0:
         raise ValueError(f"max_abs_bias must be >= 0 s/lap, got {max_abs_bias}.")
+    # Drop candidates that could not run in every fold (e.g. KNN with too few laps).
     applicable = fold_table.groupby("model")["applicable"].transform("all")
     table = fold_table[applicable.astype(bool)]
+    # Baseline RMSE per fold, to check every candidate beats it.
     baseline = table[table["model"] == BASELINE_NAME].set_index("fold")["rmse"]
     rows = []
+    # Summarise each candidate over its folds: mean and standard error of RMSE, and the checks.
     for (model, family), group in table.groupby(["model", "family"], sort=False):
         folds = group.set_index("fold")
         rows.append({
@@ -842,12 +885,16 @@ def select_models(summary, complexity):
     >>> select_models(s, {"p1": 1, "p3": 3, "k": 10})["selected"]
     'p3'
     """
+    # The baseline is a reference, never selected.
     candidates = summary[summary["family"] != "baseline"]
     if candidates.empty:
         raise ValueError("No candidate model to select from.")
+    # Step 1: the best candidate of each family by mean cross-validated RMSE.
     winners = candidates.loc[candidates.groupby("family", sort=False)["rmse_mean"].idxmin()]
+    # Step 2: the overall best and the one-standard-error threshold above it.
     best = winners.loc[winners["rmse_mean"].idxmin()]
     threshold = best["rmse_mean"] + best["rmse_se"]
+    # Step 3: among family winners within the threshold, choose the simplest.
     eligible = winners[winners["rmse_mean"] <= threshold].copy()
     eligible["complexity"] = eligible["model"].map(complexity)
     chosen = eligible.sort_values(["complexity", "rmse_mean"]).iloc[0]
@@ -921,14 +968,17 @@ def check_monotonic(degradation, max_age, tolerance_s):
     >>> check_monotonic(lambda n: 0.07 * n, 40.0, 0.05).ok
     True
     """
+    # Validate the inputs.
     if not callable(degradation):
         raise TypeError("degradation must be callable, d(ages) -> degradation [s].")
     if not np.isfinite(max_age) or max_age < 0:
         raise ValueError(f"max_age must be a finite number of laps >= 0, got {max_age}.")
     if not tolerance_s >= 0:
         raise ValueError("tolerance_s must be >= 0.")
+    # d at every whole tyre age from 0 to the oldest age, and the drop between consecutive ages.
     ages = np.arange(0.0, np.floor(max_age) + 1.0)
     drops = -np.diff(np.asarray(degradation(ages), dtype=float))
+    # The largest drop and how many drops exceed the tolerance.
     largest = float(np.max(drops)) if drops.size else 0.0
     count = int(np.sum(drops > tolerance_s))
     return MonotonicCheck(largest, count, count == 0, float(tolerance_s))
@@ -961,6 +1011,7 @@ def rank_compounds(rates):
     >>> rank_compounds(df)["compound"].tolist()
     ['C4', 'C3']
     """
+    # Validate the table, then sort by wear rate, fastest wear first, and number the ranks.
     if not isinstance(rates, pd.DataFrame):
         raise TypeError(f"rates must be a DataFrame, got {type(rates).__name__}.")
     if "rate" not in rates.columns:
@@ -1005,6 +1056,7 @@ def binned_residuals(values, residuals, bin_edges):
     >>> binned_residuals([1, 2, 11, 12], [0.1, -0.1, 0.5, 0.7], [0, 10, 20])["mean"].round(3).tolist()
     [0.0, 0.6]
     """
+    # Convert to 1-D arrays and check lengths and bin edges.
     values = np.asarray(values, dtype=float).reshape(-1)
     residuals = np.asarray(residuals, dtype=float).reshape(-1)
     if values.size != residuals.size:
@@ -1013,6 +1065,7 @@ def binned_residuals(values, residuals, bin_edges):
     if edges.ndim != 1 or edges.size < 2 or np.any(np.diff(edges) <= 0):
         raise ValueError("bin_edges must contain at least 2 strictly increasing values.")
     rows = []
+    # For each bin (low, high]: count the laps, mean residual and its standard error.
     for low, high in zip(bin_edges[:-1], bin_edges[1:]):
         inside = (values > low) & (values <= high)
         n = int(inside.sum())
@@ -1094,46 +1147,58 @@ def leftover_fuel_effect(laps, compounds, n_resamples, confidence_level, seed):
     >>> leftover_fuel_effect(clean, ["C3", "C4"], 200, 0.95, 42).flagged  # doctest: +SKIP
     False
     """
+    # Keep the requested compounds and check the settings.
     data = laps[laps["PirelliCompound"].isin(compounds)]
     if data.empty:
         raise ValueError("No laps of the requested compounds.")
     if n_resamples < 2 or not 0 < confidence_level < 1:
         raise ValueError("Need n_resamples >= 2 and 0 < confidence_level < 1.")
+    # Each driver in each race is one group (one shared base pace).
     groups = (data[RACE_COLUMN].astype(str) + "|" + data["Driver"].astype(str)).to_numpy()
     arrays = {
         "age": data[AGE_COLUMN].to_numpy(float), "lap": data[LAP_COLUMN].to_numpy(float),
         "time": data[TIME_COLUMN].to_numpy(float), "compound": data["PirelliCompound"].to_numpy(),
     }
 
+    # Least-squares slope on lap number after removing each group's mean (one offset per group).
     def slope(selection, labels):
         """Coefficient on lap number for the laps in ``selection``, grouped by ``labels``."""
         _, index = np.unique(labels, return_inverse=True)
         counts = np.bincount(index)
 
+        # Within transformation: subtract each group's mean.
         def demean(values):
             # Within transformation: subtract each driver-race group's mean.
             return values - (np.bincount(index, weights=values) / counts)[index]
 
         age, lap = arrays["age"][selection], arrays["lap"][selection]
         compound, time = arrays["compound"][selection], arrays["time"][selection]
+        # Regressors: tyre age per compound (separate wear slopes) and lap number (leftover fuel
+        # effect).
         columns = [demean(np.where(compound == c, age, 0.0)) for c in compounds]
         columns.append(demean(lap))
         result = fit_linear_least_squares(np.column_stack(columns), demean(time))
+        # The last coefficient is the lap-number slope.
         return float(result.coefficients[-1])
 
+    # Estimate on all data.
     everything = np.arange(len(groups))
     estimate = slope(everything, groups)
+    # Bootstrap: resample whole driver-races with replacement, with a seeded generator.
     unique_groups = np.unique(groups)
     members = {g: np.flatnonzero(groups == g) for g in unique_groups}
     rng = np.random.default_rng(seed)
     resampled = []
     for _ in range(n_resamples):
+        # Draw groups and collect their laps.
         chosen = rng.integers(0, unique_groups.size, size=unique_groups.size)
         selection = np.concatenate([members[unique_groups[i]] for i in chosen])
         # A group drawn twice becomes two groups with their own offsets.
+        # A group drawn twice becomes two separate groups (its own offset each time).
         labels = np.concatenate([np.full(members[unique_groups[i]].size, n) for n, i in enumerate(chosen)])
         resampled.append(slope(selection, labels))
     resampled = np.array(resampled)
+    # Percentile interval; flag the estimate if the interval excludes zero.
     tail = (1.0 - confidence_level) / 2.0 * 100.0
     lower, upper = np.percentile(resampled, [tail, 100.0 - tail])
     return FuelDiagnostic(estimate, float(np.std(resampled, ddof=1)), float(lower), float(upper),
@@ -1186,10 +1251,12 @@ def write_selection(path, selection, metadata):
     ...     load_selection(pathlib.Path(folder) / "selection.json")["selection"]
     {'C3': {'selected': 'x'}}
     """
+    # Validate the inputs and create the folder.
     if not isinstance(selection, dict) or not isinstance(metadata, dict):
         raise TypeError("selection and metadata must both be dicts.")
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Save the selection with a UTC timestamp, so it is clear it was fixed before the test.
     content = {"created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
                **metadata, "selection": selection}
     path.write_text(json.dumps(content, indent=2), encoding="utf-8")
@@ -1230,6 +1297,7 @@ def guard_cv_rerun(selection_path, test_results_path, force=False):
     ...
     tyredeg.validation.FirewallError: r.csv exists: the test race has already been evaluated, so the frozen s.json must not be overwritten. Use --force only if you deliberately want a new selection (and say so in the report).
     """
+    # If the test was already run, refuse to overwrite the frozen selection (unless forced).
     if Path(selection_path).exists() and Path(test_results_path).exists() and not force:
         raise FirewallError(
             f"{Path(test_results_path).name} exists: the test race has already been evaluated, so the "
@@ -1261,6 +1329,7 @@ def load_selection(path):
     >>> load_selection("reports/model_selection.json")["selection"]["C3"]["selected"]  # doctest: +SKIP
     'polynomial degree 1'
     """
+    # The test stage needs a selection made earlier by the cross-validation stage.
     path = Path(path)
     if not path.is_file():
         raise FirewallError(
@@ -1299,12 +1368,14 @@ def guard_test_run(results_path, log_path, force=False):
     ...     log.read_text().endswith("test evaluation\\n")
     True
     """
+    # Refuse a second test run unless explicitly forced.
     results_path, log_path = Path(results_path), Path(log_path)
     if results_path.exists() and not force:
         raise FirewallError(
             f"{results_path} already exists: the test race has been evaluated. "
             f"Re-running needs --force and is logged (D55)."
         )
+    # Log every allowed run with a timestamp, so a repeated test is always visible.
     log_path.parent.mkdir(parents=True, exist_ok=True)
     stamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     with log_path.open("a", encoding="utf-8") as log:

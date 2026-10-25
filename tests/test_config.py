@@ -99,6 +99,7 @@ def test_filled_in_phase2_values_are_accepted_and_converted():
 
 
 def test_k_fuel_range_is_accepted():
+    # A valid k_fuel range is read as a (min, max) pair.
     raw = valid_raw_config()
     raw["fuel"] = {"k_fuel": 0.046, "k_fuel_min": 0.015, "k_fuel_max": 0.07}
     assert config_from_dict(raw).k_fuel_range == (0.015, 0.07)
@@ -114,6 +115,7 @@ def test_k_fuel_range_is_accepted():
     ],
 )
 def test_invalid_k_fuel_range_is_rejected(fuel, message):
+    # Inconsistent k_fuel ranges are rejected with a message naming the problem.
     raw = valid_raw_config()
     raw["fuel"] = fuel
     with pytest.raises(ValueError, match=message):
@@ -137,6 +139,7 @@ def test_invalid_k_fuel_range_is_rejected(fuel, message):
     ],
 )
 def test_invalid_numerics_values_are_rejected(path, value, error):
+    # Walk to the nested key, set the invalid value, and expect the error.
     raw = valid_raw_config()
     target = raw
     for key in path[:-1]:
@@ -155,6 +158,7 @@ def test_numerics_section_values():
 
 
 def test_models_section_values():
+    # The models section of the real config.yaml is read with the approved values.
     models = load_config(REPO_ROOT / "config.yaml").models
     assert models.candidate_degrees == (1, 2, 3)
     assert models.b_bracket == (-0.1, 0.1)
@@ -183,6 +187,7 @@ def test_models_section_values():
     ],
 )
 def test_invalid_models_values_are_rejected(path, value, error):
+    # Walk to the nested key, set the invalid value, and expect the error.
     raw = valid_raw_config()
     target = raw
     for key in path[:-1]:
@@ -193,6 +198,7 @@ def test_invalid_models_values_are_rejected(path, value, error):
 
 
 def test_validation_section_values():
+    # The validation section of the real config.yaml is read with the approved values.
     validation = load_config(REPO_ROOT / "config.yaml").validation
     assert validation.anchor_laps == 3
     assert validation.max_abs_bias_s_per_lap == 0.10
@@ -211,6 +217,7 @@ def test_validation_section_values():
     ],
 )
 def test_invalid_validation_values_are_rejected(key, value, error):
+    # Invalid validation settings are rejected.
     raw = valid_raw_config()
     raw["validation"][key] = value
     with pytest.raises(error):
@@ -218,6 +225,7 @@ def test_invalid_validation_values_are_rejected(key, value, error):
 
 
 def test_strategy_section_values():
+    # The strategy section of the real config.yaml is read with the approved values.
     strategy = load_config(REPO_ROOT / "config.yaml").strategy
     assert strategy.data_years == (2023, 2024, 2025)
     assert strategy.compounds == ("C3", "C4")
@@ -238,6 +246,7 @@ def test_strategy_section_values():
     ],
 )
 def test_invalid_strategy_values_are_rejected(key, value, error):
+    # Invalid strategy settings are rejected.
     raw = valid_raw_config()
     raw["strategy"][key] = value
     with pytest.raises(error):
@@ -266,6 +275,7 @@ def test_sensitivity_section_values():
     ],
 )
 def test_invalid_sensitivity_values_are_rejected(key, value, error):
+    # Invalid sensitivity settings are rejected.
     raw = valid_raw_config()
     raw["sensitivity"][key] = value
     with pytest.raises(error):
@@ -273,6 +283,7 @@ def test_invalid_sensitivity_values_are_rejected(key, value, error):
 
 
 def test_performance_section_values():
+    # The performance section matches the code defaults (both must stay in sync).
     from tyredeg.performance import DEFAULT_MIN_TIME_S, DEFAULT_REPEATS, DEFAULT_WARMUP
 
     performance = load_config(REPO_ROOT / "config.yaml").performance
@@ -296,6 +307,7 @@ def test_performance_section_values():
     ],
 )
 def test_invalid_performance_values_are_rejected(key, value, error):
+    # Invalid performance settings are rejected.
     raw = valid_raw_config()
     raw["performance"][key] = value
     with pytest.raises(error):
@@ -303,6 +315,7 @@ def test_invalid_performance_values_are_rejected(key, value, error):
 
 
 def test_config_is_read_only():
+    # The configuration is frozen: no part of the code can change it after validation.
     config = config_from_dict(valid_raw_config())
     with pytest.raises(AttributeError):
         config.random_seed = 1
@@ -340,6 +353,7 @@ def test_config_is_read_only():
     ],
 )
 def test_invalid_values_are_rejected(section, key, value, error):
+    # Each invalid value is rejected with the expected error type.
     with pytest.raises(error):
         config_from_dict(with_change(section, key, value))
 
@@ -360,6 +374,7 @@ def test_invalid_values_are_rejected(section, key, value, error):
     ],
 )
 def test_invalid_race_entries_are_rejected(race, error):
+    # Malformed race entries are rejected.
     raw = valid_raw_config()
     raw["data"]["races"].append(race)
     with pytest.raises(error):
@@ -367,6 +382,7 @@ def test_invalid_race_entries_are_rejected(race, error):
 
 
 def test_duplicate_race_is_rejected():
+    # The same race listed twice (even in different case) could leak into training and test.
     raw = valid_raw_config()
     raw["data"]["races"].append(
         {"year": 2022, "event": "hungarian grand prix", "role": "test", "source": "fastf1"}
@@ -377,6 +393,7 @@ def test_duplicate_race_is_rejected():
 
 @pytest.mark.parametrize("missing_role", ["train", "test"])
 def test_needs_both_train_and_test_races(missing_role):
+    # Both a training race and a test race are required.
     raw = valid_raw_config()
     raw["data"]["races"] = [r for r in raw["data"]["races"] if r["role"] != missing_role]
     with pytest.raises(ValueError, match=missing_role):
@@ -384,6 +401,7 @@ def test_needs_both_train_and_test_races(missing_role):
 
 
 def test_missing_section_is_rejected():
+    # A missing section is reported by name.
     raw = valid_raw_config()
     del raw["fuel"]
     with pytest.raises(ValueError, match="fuel"):
@@ -391,6 +409,7 @@ def test_missing_section_is_rejected():
 
 
 def test_misspelt_key_is_rejected():
+    # A misspelt key is caught (the required key is reported as missing).
     raw = valid_raw_config()
     raw["fuel"] = {"k_feul": None}
     with pytest.raises(ValueError, match="k_fuel"):
@@ -398,11 +417,13 @@ def test_misspelt_key_is_rejected():
 
 
 def test_load_config_missing_file(tmp_path):
+    # A missing config file gives FileNotFoundError.
     with pytest.raises(FileNotFoundError):
         load_config(tmp_path / "nope.yaml")
 
 
 def test_load_config_invalid_yaml(tmp_path):
+    # Broken YAML gives a clear error rather than a parser traceback.
     bad = tmp_path / "bad.yaml"
     bad.write_text("data: [unclosed", encoding="utf-8")
     with pytest.raises(ValueError, match="not valid YAML"):

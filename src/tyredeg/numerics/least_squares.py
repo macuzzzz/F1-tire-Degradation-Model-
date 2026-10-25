@@ -90,17 +90,20 @@ class LeastSquaresResult:
 
 def _check_xy(X, y):
     """Validate the design matrix and data; return float copies."""
+    # Copy X and y as float arrays and check their shapes.
     X = np.array(X, dtype=float)
     y = np.array(y, dtype=float)
     if X.ndim != 2:
         raise ValueError(f"X must be a 2-D matrix, got shape {X.shape}.")
     if y.ndim != 1 or y.size != X.shape[0]:
         raise ValueError(f"y must be 1-D with {X.shape[0]} values, got shape {y.shape}.")
+    # n observations and p parameters; need n >= p to determine the parameters.
     n, p = X.shape
     if p == 0:
         raise ValueError("X must have at least one column.")
     if n < p:
         raise ValueError(f"Need at least as many observations as parameters (n={n} < p={p}).")
+    # NaN or infinite data would make every coefficient meaningless.
     if not (np.all(np.isfinite(X)) and np.all(np.isfinite(y))):
         raise ValueError("X and y must contain only finite numbers.")
     return X, y
@@ -108,8 +111,10 @@ def _check_xy(X, y):
 
 def _standard_errors(inverse_xtx_diagonal, rss, n, p):
     """sqrt(diag(sigma^2 (X^T X)^-1)) with sigma^2 = RSS / (n - p)."""
+    # With no residual degrees of freedom, the noise level (and so the SE) cannot be estimated.
     if n == p:
         return np.full(p, np.nan)
+    # Noise variance estimate sigma^2 = RSS / (n - p); SE = sqrt(sigma^2 * diag((X^T X)^-1)).
     sigma_squared = rss / (n - p)
     return np.sqrt(sigma_squared * inverse_xtx_diagonal)
 
@@ -148,12 +153,15 @@ def fit_linear_least_squares(X, y, condition_threshold=DEFAULT_CONDITION_THRESHO
     >>> fit_linear_least_squares(X, [1.0, 3.0, 5.0]).coefficients.round(10).tolist()
     [1.0, 2.0]
     """
+    # Check the data, then form the normal equations X^T X beta = X^T y.
     X, y = _check_xy(X, y)
     n, p = X.shape
     xtx = X.T @ X
     xty = X.T @ y
+    # Solve them with my Gaussian elimination (warns if X^T X is ill-conditioned).
     solution = gaussian_elimination(xtx, xty, condition_threshold)
     beta = solution.x
+    # Residual sum of squares of the fitted model.
     rss = float(np.sum((y - X @ beta) ** 2))
     # (X^T X)^-1 from the same LU factors, for the standard errors.
     lu, permutation = lu_factor(xtx)
@@ -208,8 +216,11 @@ def fit_linear_least_squares_qr(X, y, condition_threshold=DEFAULT_CONDITION_THRE
     X, y = _check_xy(X, y)
     n, p = X.shape
     q, r = np.linalg.qr(X, mode="reduced")
+    # Least squares via X = QR: R beta = Q^T y, solved by my back substitution.
     beta = back_substitution(r, q.T @ y)
+    # Residual sum of squares of the fitted model.
     rss = float(np.sum((y - X @ beta) ** 2))
+    # Condition of R equals that of X (not squared, as with X^T X), and warn if too large.
     condition = condition_number_1norm(r)
     if condition > condition_threshold:
         warnings.warn(
@@ -287,6 +298,7 @@ class PolynomialFit:
         >>> fit_polynomial([0, 1, 2], [1.0, 3.0, 5.0], 1).predict([3.0]).round(10).tolist()
         [7.0]
         """
+        # Evaluate the fitted polynomial at new points, using the same input scaling as the fit.
         x = np.asarray(x, dtype=float)
         if not np.all(np.isfinite(x)):
             raise ValueError("x must not contain NaN or infinite values.")
@@ -314,6 +326,7 @@ class PolynomialFit:
         >>> fit.unscaled_coefficients().round(10).tolist()
         [1.0, 2.0]
         """
+        # Convert the coefficients back to powers of the original x (for reporting).
         return unscaling_matrix(self.degree, self.centre, self.half_range) @ self.coefficients
 
 
@@ -348,10 +361,12 @@ def unscaling_matrix(degree, centre, half_range):
     >>> unscaling_matrix(1, centre=2.0, half_range=0.5).tolist()
     [[1.0, -4.0], [0.0, 2.0]]
     """
+    # Check the degree and that the scaling is valid.
     if isinstance(degree, bool) or not isinstance(degree, (int, np.integer)) or degree < 0:
         raise ValueError(f"degree must be an integer >= 0, got {degree!r}.")
     if not half_range > 0:
         raise ValueError(f"half_range must be > 0, got {half_range}.")
+    # Column k expands ((x - c) / r)^k into powers x^j with the binomial theorem.
     matrix = np.zeros((degree + 1, degree + 1))
     for k in range(degree + 1):
         for j in range(k + 1):
@@ -386,6 +401,7 @@ def polynomial_design_matrix(x, degree, centre=0.0, half_range=1.0):
     >>> polynomial_design_matrix([1.0, 2.0], 2).tolist()
     [[1.0, 1.0, 1.0], [1.0, 2.0, 4.0]]
     """
+    # Check the inputs: 1-D x, a whole degree >= 0 and a positive half-range.
     x = np.asarray(x, dtype=float)
     if x.ndim != 1:
         raise ValueError("x must be 1-D.")
@@ -393,7 +409,9 @@ def polynomial_design_matrix(x, degree, centre=0.0, half_range=1.0):
         raise ValueError(f"degree must be an integer >= 0, got {degree!r}.")
     if not half_range > 0:
         raise ValueError(f"half_range must be > 0, got {half_range}.")
+    # Map x to the scaled variable s (in [-1, 1] when scaling is on).
     s = (x - centre) / half_range
+    # Columns 1, s, s^2, ..., s^degree; each built from the previous one.
     columns = [np.ones_like(s)]
     for _ in range(degree):
         columns.append(columns[-1] * s)
@@ -437,6 +455,7 @@ def fit_polynomial(x, y, degree, scale=DEFAULT_SCALE_POLYNOMIAL_INPUTS, method="
     >>> (fit.unscaled_coefficients().round(10) + 0.0).tolist()  # + 0.0 turns -0.0 into 0.0
     [1.0, 0.0, 1.0]
     """
+    # Check the method, the scale flag, x and the degree.
     if method not in VALID_METHODS:
         raise ValueError(f"method must be one of {VALID_METHODS}, got {method!r}.")
     if not isinstance(scale, bool):
@@ -446,20 +465,25 @@ def fit_polynomial(x, y, degree, scale=DEFAULT_SCALE_POLYNOMIAL_INPUTS, method="
         raise ValueError("x must be a 1-D array of finite numbers.")
     if isinstance(degree, bool) or not isinstance(degree, (int, np.integer)) or degree < 0:
         raise ValueError(f"degree must be an integer >= 0, got {degree!r}.")
+    # A degree-d polynomial needs at least d + 1 different x values.
     if np.unique(x).size < degree + 1:
         raise ValueError(f"A degree-{degree} polynomial needs at least {degree + 1} distinct x values.")
 
+    # Default: no scaling. With scaling, map [min x, max x] onto [-1, 1] to cut the condition
+    # number.
     centre, half_range = 0.0, 1.0
     if scale and x.size > 0:
         low, high = float(np.min(x)), float(np.max(x))
         centre = (low + high) / 2.0
         if high > low:
             half_range = (high - low) / 2.0
+    # Build the design matrix and solve with the chosen method.
     X = polynomial_design_matrix(x, degree, centre, half_range)
     if method == "normal":
         result = fit_linear_least_squares(X, y, condition_threshold)
     else:
         result = fit_linear_least_squares_qr(X, y, condition_threshold)
+    # Keep the scaling with the coefficients so predict() can reuse it.
     return PolynomialFit(
         coefficients=result.coefficients,
         standard_errors=result.standard_errors,

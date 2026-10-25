@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pandas as pd
 
+# Package to review and where to write the result.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = REPO_ROOT / "src" / "tyredeg"
 OUTPUT = REPO_ROOT / "reports" / "phase9_api_review.csv"
@@ -33,6 +34,7 @@ SECTION_PATTERN = re.compile(r"^\s*(Parameters|Returns|Yields|Raises|Examples?)\
 
 def docstring_sections(docstring):
     """Set of section titles found in a docstring ("Examples" counted as "Example")."""
+    # Collect the section titles found in a docstring ("Examples" counts as "Example").
     found = set()
     for match in SECTION_PATTERN.finditer(docstring or ""):
         title = match.group(1)
@@ -41,6 +43,7 @@ def docstring_sections(docstring):
 
 
 def argument_names(function):
+    # Argument names of a function, without self/cls.
     names = [arg.arg for arg in function.args.args + function.args.kwonlyargs]
     if function.args.vararg:
         names.append(function.args.vararg.arg)
@@ -48,6 +51,7 @@ def argument_names(function):
 
 
 def returns_a_value(function):
+    # True if the function returns a value or yields.
     for node in ast.walk(function):
         if isinstance(node, ast.Return) and node.value is not None:
             return True
@@ -57,6 +61,7 @@ def returns_a_value(function):
 
 
 def called_names(function):
+    # Names of every function the given function calls.
     names = set()
     for node in ast.walk(function):
         if isinstance(node, ast.Call):
@@ -68,11 +73,13 @@ def called_names(function):
 
 
 def contains_raise(function):
+    # True if the function raises an exception anywhere in its body.
     return any(isinstance(node, ast.Raise) for node in ast.walk(function))
 
 
 def all_functions():
     """Every function definition in the package (public and private), by name."""
+    # Every function definition in the package, grouped by name.
     by_name = {}
     for path in sorted(PACKAGE.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -84,8 +91,10 @@ def all_functions():
 
 def validating_names(by_name):
     """Names of functions that raise, directly or through functions they call."""
+    # Start with the functions that raise directly...
     validating = {name for name, nodes in by_name.items() if any(contains_raise(node) for node in nodes)}
     # Repeat until no new name is added (a fixed point of "calls a validating function").
+    # ...then repeatedly add functions that call a validating function, until nothing changes.
     changed = True
     while changed:
         changed = False
@@ -100,6 +109,7 @@ def validating_names(by_name):
 
 def public_objects():
     """Yield (path, line, name, kind, ast node) for each public object."""
+    # Walk every module and yield each public function, class and method.
     for path in sorted(PACKAGE.rglob("*.py")):
         relative = path.relative_to(REPO_ROOT).as_posix()
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -111,6 +121,8 @@ def public_objects():
                 yield relative, node.lineno, node.name, "function", node
             elif isinstance(node, ast.ClassDef):
                 yield relative, node.lineno, node.name, "class", node
+                # Public methods of the class (properties are documented like attributes, so
+                # skipped).
                 for item in node.body:
                     if not isinstance(item, ast.FunctionDef) or item.name.startswith("_"):
                         continue
@@ -121,12 +133,15 @@ def public_objects():
 
 
 def review():
+    # Required sections for each object, and whether it validates its inputs.
     by_name = all_functions()
     validating = validating_names(by_name)
     rows = []
     for path, line, name, kind, node in public_objects():
         docstring = ast.get_docstring(node)
         found = docstring_sections(docstring)
+        # A class needs an Example; a function needs Parameters/Returns (if relevant), Raises and
+        # Example.
         if docstring is None:
             missing = ["docstring"]
         elif kind == "class":
@@ -139,6 +154,7 @@ def review():
                 required.insert(1 if argument_names(node) else 0, "Returns")
             missing = [section for section in required
                        if section not in found and not (section == "Returns" and "Yields" in found)]
+        # Validation only matters for objects that take arguments.
         takes_arguments = kind != "class" and bool(argument_names(node))
         validates = "n/a" if not takes_arguments else ("yes" if node.name in validating else "no")
         rows.append({"file": path, "line": line, "name": name, "kind": kind,
@@ -147,6 +163,7 @@ def review():
 
 
 def main():
+    # Run the review, save the table and print a summary.
     table = review()
     OUTPUT.parent.mkdir(exist_ok=True)
     table.to_csv(OUTPUT, index=False)

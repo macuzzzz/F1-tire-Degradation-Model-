@@ -33,6 +33,7 @@ def msg(time, category, message, flag=None, scope=None, sector=None):
 
 
 def windows(records):
+    # Non-green windows from a list of messages.
     return non_green_intervals(messages_from_records(records))
 
 
@@ -44,6 +45,7 @@ def test_no_messages_means_always_green():
 
 
 def test_sector_yellow_until_cleared():
+    # A sector yellow lasts until that sector is cleared.
     result = windows([
         msg("13:20:00", "Flag", "YELLOW IN TRACK SECTOR 5", "YELLOW", "Sector", 5),
         msg("13:20:30", "Flag", "CLEAR IN TRACK SECTOR 5", "CLEAR", "Sector", 5),
@@ -64,6 +66,7 @@ def test_overlapping_sector_yellows_form_one_window():
 
 
 def test_vsc_lasts_until_track_clear_not_until_ending():
+    # A VSC lasts until "TRACK CLEAR", not until "VSC ENDING".
     result = windows([
         msg("13:04:36", "SafetyCar", "VIRTUAL SAFETY CAR DEPLOYED"),
         msg("13:06:43", "SafetyCar", "VIRTUAL SAFETY CAR ENDING"),
@@ -73,6 +76,7 @@ def test_vsc_lasts_until_track_clear_not_until_ending():
 
 
 def test_safety_car_until_track_clear():
+    # A safety car lasts until "TRACK CLEAR".
     result = windows([
         msg("16:18:40", "SafetyCar", "SAFETY CAR DEPLOYED"),
         msg("16:28:00", "SafetyCar", "SAFETY CAR IN THIS LAP"),
@@ -82,6 +86,7 @@ def test_safety_car_until_track_clear():
 
 
 def test_track_clear_also_clears_sector_yellows():
+    # "TRACK CLEAR" also ends any sector yellow still open.
     result = windows([
         msg("13:00:00", "Flag", "YELLOW IN TRACK SECTOR 3", "YELLOW", "Sector", 3),
         msg("13:00:10", "Flag", "TRACK CLEAR", "CLEAR", "Track"),
@@ -90,6 +95,7 @@ def test_track_clear_also_clears_sector_yellows():
 
 
 def test_red_flag_until_green():
+    # A red flag lasts until the green light.
     result = windows([
         msg("14:00:00", "Flag", "RED FLAG", "RED", "Track"),
         msg("14:30:00", "Flag", "GREEN LIGHT - PIT EXIT OPEN", "GREEN", "Track"),
@@ -98,11 +104,13 @@ def test_red_flag_until_green():
 
 
 def test_unfinished_window_is_open_ended():
+    # A window never closed stays open until the end of the race.
     result = windows([msg("15:00:00", "SafetyCar", "SAFETY CAR DEPLOYED")])
     assert result == [(T("2023-07-23 15:00:00"), pd.Timestamp.max)]
 
 
 def test_irrelevant_messages_are_ignored():
+    # Blue flags, DRS and track-limit messages do not affect green status.
     result = windows([
         msg("13:00:00", "Flag", "BLUE FLAG FOR CAR 2 (SAR)", "BLUE", "Driver"),
         msg("13:01:00", "Drs", "DRS ENABLED"),
@@ -113,6 +121,7 @@ def test_irrelevant_messages_are_ignored():
 
 
 def test_messages_are_processed_in_time_order():
+    # Messages are sorted by time before processing.
     unordered = [
         msg("13:20:30", "Flag", "CLEAR IN TRACK SECTOR 5", "CLEAR", "Sector", 5),
         msg("13:20:00", "Flag", "YELLOW IN TRACK SECTOR 5", "YELLOW", "Sector", 5),
@@ -121,6 +130,7 @@ def test_messages_are_processed_in_time_order():
 
 
 def test_non_green_intervals_rejects_bad_input():
+    # Invalid message tables are rejected.
     with pytest.raises(TypeError):
         non_green_intervals([{"date": "x"}])
     with pytest.raises(ValueError, match="missing"):
@@ -145,10 +155,12 @@ WINDOW = [(T("2023-07-23 13:20:00"), T("2023-07-23 13:20:30"))]
     ],
 )
 def test_is_green_lap_overlap_cases(start, lap_time, expected):
+    # A lap is green only if it does not overlap any non-green window.
     assert is_green_lap(T(f"2023-07-23 {start}"), lap_time, WINDOW) is expected
 
 
 def test_missing_timing_is_not_green():
+    # A lap with missing timing cannot be shown to be green, so it is not green.
     assert is_green_lap(None, 80.0, []) is False
     assert is_green_lap(pd.NaT, 80.0, []) is False
     assert is_green_lap(T("2023-07-23 13:00:00"), None, []) is False
@@ -165,11 +177,13 @@ def test_to_naive_utc_converts_timezones():
 
 
 def test_to_naive_utc_rejects_garbage():
+    # Text that is not a date is rejected.
     with pytest.raises(ValueError):
         to_naive_utc(pd.Series(["not a date"]))
 
 
 def test_messages_from_records_validates():
+    # Messages must be a list of records with the required keys.
     with pytest.raises(TypeError):
         messages_from_records("SAFETY CAR DEPLOYED")
     with pytest.raises(ValueError, match="missing keys"):

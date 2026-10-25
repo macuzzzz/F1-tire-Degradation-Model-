@@ -19,10 +19,12 @@ from pathlib import Path
 
 import matplotlib
 
+# Draw figures to files only (no window).
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
+# Make the package in src/ importable when this script is run directly.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
@@ -37,10 +39,13 @@ EXAMPLE_YEAR = 2024
 
 def plot_cleaning(prepared, year):
     laps = prepared.all_laps
+    # Mark each lap of the race as kept (in the clean table) or removed.
     kept = set(zip(prepared.clean["Driver"], prepared.clean["LapNumber"]))
     is_kept = np.array([(d, n) in kept for d, n in zip(laps["Driver"], laps["LapNumber"])])
+    # Median clean lap time, used to zoom the y-axis.
     median = float(np.nanmedian(prepared.clean["LapTime"]))
     fig, ax = plt.subplots(figsize=(8, 4.5))
+    # Removed laps in red, kept laps in blue.
     ax.scatter(laps.loc[~is_kept, "LapNumber"], laps.loc[~is_kept, "LapTime"], s=6, color="tab:red",
                alpha=0.5, label=f"removed ({(~is_kept).sum()} laps)")
     ax.scatter(laps.loc[is_kept, "LapNumber"], laps.loc[is_kept, "LapTime"], s=6, color="tab:blue",
@@ -58,6 +63,7 @@ def plot_cleaning(prepared, year):
 
 
 def plot_fuel_correction(clean, year, k_fuel):
+    # Median lap time per lap number, before and after fuel correction.
     per_lap = clean.groupby("LapNumber")[["LapTime", "FuelCorrectedTime"]].median()
     fig, ax = plt.subplots(figsize=(8, 4.5))
     ax.plot(per_lap.index, per_lap["LapTime"], "o-", ms=3, label="raw lap time")
@@ -74,6 +80,7 @@ def plot_fuel_correction(clean, year, k_fuel):
 
 
 def plot_raw_degradation(clean, compounds):
+    # One panel per compound: every clean training lap, coloured by year.
     fig, axes = plt.subplots(1, len(compounds), figsize=(5.5 * len(compounds), 4), sharey=True)
     for ax, compound in zip(np.atleast_1d(axes), compounds):
         laps = clean[clean["PirelliCompound"] == compound]
@@ -91,6 +98,7 @@ def plot_raw_degradation(clean, compounds):
 
 def plot_pit_loss(estimate, years):
     fig, ax = plt.subplots(figsize=(7, 4))
+    # Histogram of all measured pit losses with the median and the interquartile range.
     ax.hist(estimate.stops["PitLoss"], bins=30, color="tab:grey", edgecolor="white")
     ax.axvline(estimate.median_s, color="tab:red", label=f"median {estimate.median_s:.2f} s")
     ax.axvspan(estimate.q25_s, estimate.q75_s, color="tab:red", alpha=0.15,
@@ -107,19 +115,23 @@ def plot_pit_loss(estimate, years):
 
 def main(config=None):
     """Make the data figures; ``config`` defaults to the repository's config.yaml."""
+    # FastF1 logs every cache access; keep only its errors. Load the config unless given.
     logging.getLogger("fastf1").setLevel(logging.ERROR)
     if config is None:
         config = load_config(REPO_ROOT / "config.yaml")
     FIGURES.mkdir(parents=True, exist_ok=True)
+    # Cleaning and fuel-correction figures for one example race.
     example = [race for race in config.races if race.year == EXAMPLE_YEAR]
     prepared = prepare_laps(config, example)
     plot_cleaning(prepared, EXAMPLE_YEAR)
     plot_fuel_correction(prepared.clean, EXAMPLE_YEAR, config.k_fuel)
 
+    # Raw degradation scatter for the training races.
     training = prepare_laps(config, config.train_races).clean
     plot_raw_degradation(training, config.pirelli_compounds)
 
     # Same races as the strategy pit loss (D58), so the figure shows the value used.
+    # Pit-loss distribution from the strategy races (the value the strategy uses).
     years = list(config.strategy.data_years)
     strategy_data = prepare_laps(config, [race for race in config.races if race.year in years])
     plot_pit_loss(estimate_pit_loss(strategy_data.all_laps, strategy_data.clean), years)

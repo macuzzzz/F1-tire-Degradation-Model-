@@ -21,11 +21,13 @@ from pathlib import Path
 
 import matplotlib
 
+# Draw figures to files only (no window).
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
+# Make the package in src/ importable when this script is run directly.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
@@ -52,6 +54,7 @@ from tyredeg.validation import load_selection  # noqa: E402
 
 REPORTS = REPO_ROOT / "reports"
 FIGURES = REPORTS / "figures"
+# Outputs analysed for each input, with labels for the figures.
 OUTPUTS = {
     "L_star": "continuous optimum L* (C3 first, unconstrained) [laps]",
     "pit_lap": "optimal integer pit lap (C3 first, within stint limits)",
@@ -65,14 +68,17 @@ class Scenario:
     """Evaluates the Phase 6 strategy with any inputs overridden (D67)."""
 
     def __init__(self, config, prepared, model_names):
+        # Keep the prepared data; cache strategy inputs so each setting is built only once.
         self.config = config
         self.prepared = prepared
         self.model_names = model_names
         self.cache = {}
 
     def inputs(self, k_fuel, model, min_laps):
+        # Building inputs refits the models, so reuse them for repeated settings.
         key = (k_fuel, model, min_laps)
         if key not in self.cache:
+            # Use the selected model, or an alternative model for every compound.
             names = dict(self.model_names) if model is None else {c: model for c in self.model_names}
             self.cache[key] = build_strategy_inputs(self.prepared.all_laps, self.prepared.clean,
                                                     self.config, names, k_fuel=k_fuel,
@@ -81,19 +87,24 @@ class Scenario:
 
     def evaluate(self, k_fuel=None, pit_loss=None, rate_C3=None, rate_C4=None, delta=None,
                  model=None, min_laps=None):
+        # Start from the nominal inputs for this fuel coefficient, model and stint-limit rule.
         k_fuel = self.config.k_fuel if k_fuel is None else k_fuel
         built = self.inputs(k_fuel, model, min_laps)
         models = dict(built.models)
+        # Optionally replace a compound's fitted curve with a straight line of a given wear rate.
         for compound, rate in (("C3", rate_C3), ("C4", rate_C4)):
             if rate is not None:
                 models[compound] = replace(models[compound], model=LinearDegradation(rate))
+        # Optionally change the compound pace delta (C4 base pace relative to C3).
         if delta is not None:
             models["C4"] = replace(models["C4"], base_time=models["C3"].base_time + delta)
+        # Pit loss: nominal or overridden.
         pit_loss = built.pit_loss if pit_loss is None else pit_loss
         n, add = built.total_laps, self.config.strategy.add_fuel_effect
 
         # L* is the UNCONSTRAINED optimum, so it is computed with the stint
         # limits relaxed to n - 1 laps (it must not depend on them; C7).
+        # Unconstrained optimum L*: relax the stint limits so the optimiser can go anywhere.
         relaxed = {c: replace(m, max_stint_laps=n - 1) for c, m in models.items()}
         try:
             l_star = optimise_continuous("C3", "C4", relaxed, n, pit_loss, k_fuel, add,
@@ -101,14 +112,17 @@ class Scenario:
                                          ftol=self.config.strategy.root_ftol).continuous_root
         except TypeError:
             l_star = np.nan  # KNN: no closed-form integral, brute force only
+        # Best one-stop time (either order) and the integer pit lap for C3 first.
         try:
             one = min((optimise_brute_force(a, b, models, n, pit_loss, k_fuel, add)
                        for a, b in (("C3", "C4"), ("C4", "C3"))), key=lambda r: r.total_time)
             c3_first = optimise_brute_force("C3", "C4", models, n, pit_loss, k_fuel, add)
             one_time, pit_lap = one.total_time, c3_first.pit_laps[0]
+        # Under a stricter stint-limit rule no one-stop race may fit; record that as NaN.
         except ValueError:
             # No one-stop fits within the stint limits (C7).
             one_time, pit_lap = np.nan, np.nan
+        # Best of all six two-stop sequences that fit the limits.
         twos = []
         for sequence in (("C3", "C4", "C4"), ("C3", "C3", "C4"), ("C3", "C4", "C3"),
                          ("C4", "C3", "C4"), ("C4", "C4", "C3"), ("C4", "C3", "C3")):
@@ -117,10 +131,12 @@ class Scenario:
             except ValueError:
                 pass
         two = min(twos, key=lambda r: r.total_time)
+        # Which strategy wins in this scenario.
         if np.isnan(one_time):
             best = "two stops (one stop infeasible)"
         else:
             best = "two stops" if two.total_time < one_time else "one stop"
+        # All outputs of this scenario.
         return {
             "L_star": l_star,
             "pit_lap": pit_lap,
@@ -134,6 +150,7 @@ class Scenario:
 
 def per_year_rates(clean, compounds):
     """Linear rate of each compound in each strategy year (nominal k_fuel)."""
+    # Linear wear rate per year and compound (for the year-to-year scenarios).
     rates = {}
     for year, group in clean.groupby("Year"):
         rates[year] = {}
@@ -147,9 +164,11 @@ def per_year_rates(clean, compounds):
 
 def main(config=None):
     """Run this stage; ``config`` defaults to the repository's config.yaml (used by run_pipeline.py)."""
+    # FastF1 logs every cache access; keep only its errors. Load the config unless given.
     logging.getLogger("fastf1").setLevel(logging.ERROR)
     if config is None:
         config = load_config(REPO_ROOT / "config.yaml")
+    # Strategy races, prepared once; the nominal scenario first.
     races = [race for race in config.races if race.year in config.strategy.data_years]
     prepared = prepare_laps(config, races)
     selection = load_selection(REPO_ROOT / config.validation.selection_file)["selection"]
@@ -160,18 +179,21 @@ def main(config=None):
     print("Nominal outputs:", nominal)
 
     # Fitted uncertainty of the wear rates: stint bootstrap (D45, D67).
+    # Nominal wear rates and their bootstrap standard errors.
     rates, se = {}, {}
     for compound in ("C3", "C4"):
         model = nominal_inputs.models[compound].model
         rates[compound] = float(model.params()["coefficients"][0])
         se[compound] = float(model.bootstrap(config.models.bootstrap_resamples, config.models.confidence_level,
                                              config.random_seed).standard_errors[0])
+    # Per-year rates, the compound delta range and the pit-loss quartiles.
     years = per_year_rates(prepared.clean, ("C3", "C4"))
     delta_info = nominal_inputs.deltas["C4"]
     pit = nominal_inputs.pit_info
     low_k, high_k = config.k_fuel_range
     print(f"rates {rates}, bootstrap SE {se}, per-year {years}")
 
+    # Build the list of one-at-a-time variations: (input, label, overrides).
     variations = [
         ("fuel coefficient k_fuel", "0.015", {"k_fuel": low_k}),
         ("fuel coefficient k_fuel", "0.070", {"k_fuel": high_k}),
@@ -181,6 +203,7 @@ def main(config=None):
         ("compound delta C4-C3", "C4-first median", {"delta": delta_info["median_other_first"]}),
     ]
     settings = config.sensitivity
+    # Stint-limit rule alternatives, wear rates at +/- 1 and 2 SE, and the low/high-wear years.
     for min_laps in settings.alternative_min_laps:
         variations.append(("stint-limit rule", f">={min_laps} laps", {"min_laps": min_laps}))
     for compound in ("C3", "C4"):
@@ -192,14 +215,17 @@ def main(config=None):
     for label, year in (("low-wear year", low_year), ("high-wear year", high_year)):
         variations.append(("year-to-year wear", f"{label} {year}",
                            {"rate_C3": years[year]["C3"], "rate_C4": years[year]["C4"]}))
+    # The other Phase 5 model families.
     for model in settings.alternative_models:
         variations.append(("degradation model", model, {"model": model}))
 
+    # Run every variation and save the table.
     oat = one_at_a_time(scenario.evaluate, variations)
     REPORTS.mkdir(exist_ok=True)
     FIGURES.mkdir(exist_ok=True)
     oat.to_csv(REPORTS / "phase7_oat.csv", index=False)
 
+    # Tornado table and figure for each output of interest.
     for output in ("margin", "L_star", "pit_lap"):
         table = tornado_table(oat, output)
         table.to_csv(REPORTS / f"phase7_tornado_{output}.csv", index=False)
@@ -207,6 +233,7 @@ def main(config=None):
                      OUTPUTS[output], FIGURES / f"phase7_tornado_{output}.png")
 
     # Local coefficients (smooth outputs only, D69).
+    # Local sensitivity coefficients by central difference: relative steps, except for the delta.
     continuous_inputs = {
         "fuel coefficient k_fuel": ("k_fuel", config.k_fuel, "relative"),
         "pit loss": ("pit_loss", nominal_inputs.pit_loss, "relative"),
@@ -215,9 +242,11 @@ def main(config=None):
         "compound delta C4-C3": ("delta", delta_info["delta"], "absolute"),
     }
     rows, checks = [], []
+    # Derivative of each output with respect to each input, plus the step-size check.
     for label, (argument, x0, kind) in continuous_inputs.items():
         for output in ("L_star", "one_stop_time", "two_stop_time", "margin"):
             def f(x, argument=argument, output=output):
+                # One output as a function of one input (defaults fix the loop's values).
                 return scenario.evaluate(**{argument: x})[output]
             if kind == "relative":
                 result = sensitivity_coefficient(f, x0, relative_step=settings.relative_step)
@@ -234,10 +263,12 @@ def main(config=None):
 
     # Break-even values: where one stop and two stops take the same time
     # (margin = 0), found with my bisection (D73).
+    # Break-even values: bisection on the margin (one stop minus two stops) = 0.
     break_even = []
     for label, argument, bracket in (("fuel coefficient k_fuel", "k_fuel", (low_k, config.k_fuel)),
                                      ("pit loss", "pit_loss", (nominal_inputs.pit_loss, 40.0))):
         def margin_of(x, argument=argument):
+            # Two-stop margin as a function of one input; its root is the break-even value.
             return scenario.evaluate(**{argument: x})["margin"]
         root = bisection(margin_of, *bracket, xtol=1e-5, ftol=0.0)
         break_even.append({"input": label, "break_even": root.root, "iterations": root.iterations,
@@ -245,6 +276,7 @@ def main(config=None):
     pd.DataFrame(break_even).to_csv(REPORTS / "phase7_break_even.csv", index=False)
 
     # How the fuel coefficient changes the fitted wear rate itself (D72).
+    # Fitted wear rate as a function of k_fuel (shows the one-for-one confounding).
     k_grid = np.round(np.arange(0.0, 0.0801, 0.005), 3)
     fuel_rows = []
     fig, ax = plt.subplots(figsize=(6.5, 4.5))
@@ -253,6 +285,7 @@ def main(config=None):
         fuel_rows.append(table.assign(compound=compound, slope=slope))
         ax.plot(table["k_fuel"], table["rate"], "o-", label=f"{compound}: d(rate)/dk = {slope:.6f}")
         print(f"{compound}: rate vs k_fuel slope {slope:.9f}")
+    # Mark the plausible k_fuel range and the nominal value.
     ax.axvspan(low_k, high_k, color="grey", alpha=0.15, label="k_fuel sensitivity range")
     ax.axvline(config.k_fuel, color="black", linestyle=":", label=f"nominal k_fuel = {config.k_fuel}")
     ax.set_xlabel("fuel coefficient k_fuel [s per lap of fuel]")
@@ -265,6 +298,7 @@ def main(config=None):
     plt.close(fig)
     pd.concat(fuel_rows).to_csv(REPORTS / "phase7_fuel_vs_rate.csv", index=False)
 
+    # Print the main tables.
     pd.set_option("display.width", 220)
     print("\nOne-at-a-time:\n", oat.round(3).to_string(index=False))
     print("\nTornado (margin):\n", tornado_table(oat, "margin").round(3).to_string(index=False))

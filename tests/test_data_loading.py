@@ -74,6 +74,7 @@ class FakeSession:
         self.load_kwargs = None  # records how load() was called
 
     def load(self, **kwargs):
+        # Record how load() was called, and fail if the test asked for an error.
         self.load_kwargs = kwargs
         if self._load_error is not None:
             raise self._load_error
@@ -96,6 +97,7 @@ def fake_get_session(monkeypatch):
     settings = {"sessions": {}, "calls": []}
 
     def fake(year, event, identifier):
+        # Stand-in for fastf1.get_session: record the call and return a canned session.
         settings["calls"].append((year, event, identifier))
         if (year, event) in settings["sessions"]:
             return settings["sessions"][(year, event)]
@@ -124,6 +126,7 @@ def test_timedelta_to_seconds_keeps_missing_as_nan():
 
 @pytest.mark.parametrize("bad", [[92.5], pd.Series([92.5]), pd.Series(["1:32"])])
 def test_timedelta_to_seconds_rejects_wrong_types(bad):
+    # Only timedelta Series can be converted to seconds.
     with pytest.raises(TypeError):
         timedelta_to_seconds(bad)
 
@@ -134,15 +137,18 @@ def test_timedelta_to_seconds_rejects_wrong_types(bad):
      ("", False), (None, False), (float("nan"), False)],
 )
 def test_is_green_track_status(status, expected):
+    # Only a status made of "1" codes counts as green.
     assert is_green_track_status(status) is expected
 
 
 def test_make_race_id_format():
+    # Race ids are lower-case with underscores; non-letters become "_".
     assert make_race_id(2023, "Hungarian Grand Prix") == "2023_hungarian_grand_prix"
     assert make_race_id(2024, "  São Paulo Grand Prix ") == "2024_s_o_paulo_grand_prix"
 
 
 def test_make_race_id_rejects_bad_input():
+    # Names without letters or digits, and non-integer years, are rejected.
     with pytest.raises(ValueError):
         make_race_id(2023, "!!!")
     with pytest.raises(TypeError):
@@ -172,6 +178,7 @@ def test_fastf1_load_converts_times_and_flags(fake_get_session):
 
 
 def test_fastf1_load_adds_identifier_columns(fake_get_session):
+    # The loader adds the race-level columns (year, id, length, source) to every lap.
     laps = load_race_laps(2022, "Hungarian Grand Prix")
     assert (laps["Year"] == 2022).all()
     assert (laps["RaceId"] == "2022_hungarian_grand_prix").all()
@@ -180,6 +187,7 @@ def test_fastf1_load_adds_identifier_columns(fake_get_session):
 
 
 def test_fastf1_load_requests_only_lap_data(fake_get_session):
+    # Only laps and messages are downloaded (no telemetry or weather), to save time and space.
     session = FakeSession(laps=make_fake_laps())
     fake_get_session["sessions"][(2022, "Hungarian Grand Prix")] = session
     load_race_laps(2022, "Hungarian Grand Prix")
@@ -189,6 +197,7 @@ def test_fastf1_load_requests_only_lap_data(fake_get_session):
 
 
 def test_fastf1_load_without_optional_columns(fake_get_session):
+    # Optional FastF1 columns may be missing without breaking the loader.
     laps_without_flags = make_fake_laps().drop(columns=["IsAccurate", "Deleted"])
     fake_get_session["sessions"][(2022, "Hungarian Grand Prix")] = FakeSession(
         laps=laps_without_flags
@@ -199,6 +208,7 @@ def test_fastf1_load_without_optional_columns(fake_get_session):
 
 
 def test_fastf1_missing_total_laps_gives_nan(fake_get_session):
+    # An unknown race length becomes NaN, never a guessed number.
     fake_get_session["sessions"][(2022, "Hungarian Grand Prix")] = FakeSession(
         laps=make_fake_laps(), total_laps=None
     )
@@ -219,33 +229,39 @@ def test_event_name_match_is_case_insensitive(fake_get_session):
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("year", ["2022", 2022.0, True, None])
 def test_rejects_non_int_year(year):
+    # A non-integer year is rejected.
     with pytest.raises(TypeError):
         load_race_laps(year, "Hungarian Grand Prix")
 
 
 def test_rejects_year_before_2018():
+    # Seasons before 2018 have no lap-timing data.
     with pytest.raises(ValueError):
         load_race_laps(2017, "Hungarian Grand Prix")
 
 
 @pytest.mark.parametrize("event, error", [("", ValueError), ("   ", ValueError), (5, TypeError)])
 def test_rejects_bad_event(event, error):
+    # Empty or non-string event names are rejected.
     with pytest.raises(error):
         load_race_laps(2022, event)
 
 
 @pytest.mark.parametrize("session", ["Q", "FP1", "r", ""])
 def test_rejects_unsupported_session(session):
+    # Only race sessions are supported.
     with pytest.raises(ValueError):
         load_race_laps(2022, "Hungarian Grand Prix", session=session)
 
 
 def test_rejects_unknown_source():
+    # Unknown data sources are rejected.
     with pytest.raises(ValueError, match="source"):
         load_race_laps(2023, "Hungarian Grand Prix", source="ergast")
 
 
 def test_openf1_source_needs_a_client():
+    # OpenF1 races need an OpenF1 client.
     with pytest.raises(ValueError, match="OpenF1Client"):
         load_race_laps(2023, "Hungarian Grand Prix", source="openf1")
 
@@ -273,6 +289,7 @@ def test_race_not_found_is_a_value_error(fake_get_session):
 
 
 def test_get_session_value_error_becomes_race_not_found(monkeypatch):
+    # FastF1's "event not found" error becomes this project's RaceNotFoundError.
     def raise_value_error(year, event, identifier):
         raise ValueError("no such event")
 
@@ -282,6 +299,7 @@ def test_get_session_value_error_becomes_race_not_found(monkeypatch):
 
 
 def test_get_session_network_error_becomes_data_unavailable(monkeypatch):
+    # A network error becomes RaceDataUnavailableError.
     def raise_connection_error(year, event, identifier):
         raise ConnectionError("offline")
 
@@ -291,6 +309,7 @@ def test_get_session_network_error_becomes_data_unavailable(monkeypatch):
 
 
 def test_load_exception_becomes_data_unavailable(fake_get_session):
+    # A failure during the download becomes RaceDataUnavailableError with the cause in the message.
     fake_get_session["sessions"][(2022, "Hungarian Grand Prix")] = FakeSession(
         laps=make_fake_laps(), load_error=ConnectionError("timeout")
     )
@@ -306,6 +325,7 @@ def test_laps_not_loaded_becomes_data_unavailable(fake_get_session):
 
 
 def test_empty_laps_becomes_data_unavailable(fake_get_session):
+    # A race with no laps is reported clearly.
     empty = make_fake_laps().iloc[0:0]
     fake_get_session["sessions"][(2022, "Hungarian Grand Prix")] = FakeSession(laps=empty)
     with pytest.raises(RaceDataUnavailableError, match="no laps"):
@@ -313,6 +333,7 @@ def test_empty_laps_becomes_data_unavailable(fake_get_session):
 
 
 def test_missing_required_column_becomes_data_unavailable(fake_get_session):
+    # A missing required column is reported by name.
     no_compound = make_fake_laps().drop(columns=["Compound"])
     fake_get_session["sessions"][(2022, "Hungarian Grand Prix")] = FakeSession(laps=no_compound)
     with pytest.raises(RaceDataUnavailableError, match="Compound"):
@@ -332,9 +353,11 @@ def test_load_many_stacks_races_with_ids(fake_get_session):
 
 
 def test_load_many_dispatches_openf1_races(fake_get_session, monkeypatch, tmp_path):
+    # Races marked "openf1" are sent to the OpenF1 loader with the client.
     received = []
 
     def fake_openf1(year, event, client):
+        # Stand-in for the OpenF1 loader: record the call and return fake laps.
         received.append((year, event, client))
         return load_race_laps(2022, "Hungarian Grand Prix").assign(Year=year, Source="openf1")
 
@@ -347,11 +370,13 @@ def test_load_many_dispatches_openf1_races(fake_get_session, monkeypatch, tmp_pa
 
 
 def test_load_many_rejects_empty_list():
+    # An empty race list is rejected.
     with pytest.raises(ValueError):
         load_many([])
 
 
 def test_load_many_rejects_duplicate_race():
+    # The same race twice is rejected.
     with pytest.raises(ValueError, match="more than once"):
         load_many([(2022, "Hungarian Grand Prix"), (2022, "hungarian grand prix")])
 
@@ -360,11 +385,13 @@ def test_load_many_rejects_duplicate_race():
     "races", ["2022 Hungary", [2022], [(2022,)], [("2022", "Hungary")], [(2022, "Hungary", "x", 1)]]
 )
 def test_load_many_rejects_malformed_races(races):
+    # Malformed race entries are rejected.
     with pytest.raises(TypeError):
         load_many(races)
 
 
 def test_load_many_rejects_unknown_source():
+    # Unknown sources are rejected.
     with pytest.raises(ValueError, match="source"):
         load_many([(2022, "Hungarian Grand Prix", "ergast")])
 
@@ -377,6 +404,7 @@ def test_load_many_validates_everything_before_downloading(fake_get_session):
 
 
 def test_load_many_propagates_failure(fake_get_session):
+    # A failure in any one race stops the whole load.
     fake_get_session["sessions"][(2021, "Hungarian Grand Prix")] = FakeSession(laps=None)
     with pytest.raises(RaceDataUnavailableError):
         load_many([(2022, "Hungarian Grand Prix"), (2021, "Hungarian Grand Prix")])
@@ -398,42 +426,50 @@ def make_mixed_laps():
 
 
 def test_select_laps_by_team_and_compound():
+    # Team and compound filters combine, and the result is re-indexed from 0.
     selected = select_laps(make_mixed_laps(), teams=["Red Bull Racing"], compounds=["HARD"])
     assert selected["Driver"].tolist() == ["VER", "PER"]
     assert list(selected.index) == [0, 1]
 
 
 def test_select_laps_by_pirelli_compound():
+    # Laps can be selected by Pirelli compound.
     selected = select_laps(make_mixed_laps(), pirelli_compounds=["C3"])
     assert selected["Driver"].tolist() == ["VER", "PER", "LEC"]
 
 
 def test_select_laps_pirelli_filter_needs_column():
+    # The Pirelli filter needs the PirelliCompound column.
     with pytest.raises(ValueError, match="PirelliCompound"):
         select_laps(make_mixed_laps().drop(columns=["PirelliCompound"]), pirelli_compounds=["C3"])
 
 
 def test_select_laps_none_means_no_filter():
+    # No filter means every lap is kept.
     laps = make_mixed_laps()
     assert len(select_laps(laps)) == len(laps)
 
 
 def test_select_laps_by_driver():
+    # Laps can be selected by driver.
     selected = select_laps(make_mixed_laps(), drivers=["VER"])
     assert selected["Compound"].tolist() == ["HARD", "SOFT"]
 
 
 def test_select_laps_unknown_compound():
+    # Unknown compound labels are rejected.
     with pytest.raises(ValueError, match="Unknown compound"):
         select_laps(make_mixed_laps(), compounds=["SUPERSOFT"])
 
 
 def test_select_laps_no_match_raises():
+    # A filter that matches nothing raises an error rather than returning an empty table.
     with pytest.raises(ValueError, match="No laps match"):
         select_laps(make_mixed_laps(), teams=["Williams"])
 
 
 def test_select_laps_rejects_bad_inputs():
+    # Invalid tables and filters are rejected with the right error types.
     with pytest.raises(TypeError):
         select_laps("not a dataframe")
     with pytest.raises(ValueError):
@@ -459,5 +495,6 @@ def test_enable_cache_creates_folder_and_calls_fastf1(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("bad, error", [("", ValueError), (None, TypeError), (42, TypeError)])
 def test_enable_cache_rejects_bad_path(bad, error):
+    # Invalid cache paths are rejected.
     with pytest.raises(error):
         enable_cache(bad)

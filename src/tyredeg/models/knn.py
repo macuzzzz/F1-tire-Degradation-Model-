@@ -51,9 +51,11 @@ QUERY_BLOCK_SIZE = 512
 
 def _as_feature_matrix(X, name):
     """Return X as a 2-D float array (n_samples, n_features); 1-D means one feature."""
+    # Accept one feature as a 1-D array (one column) or several as a 2-D array.
     X = np.asarray(X, dtype=float)
     if X.ndim == 1:
         X = X.reshape(-1, 1)
+    # Reject empty or non-finite inputs.
     if X.ndim != 2 or X.shape[0] == 0:
         raise ValueError(f"{name} must be a non-empty 1-D or 2-D array.")
     if not np.all(np.isfinite(X)):
@@ -84,6 +86,7 @@ class KNNRegressor:
     """
 
     def __init__(self, k=5, weights="uniform"):
+        # Validate k and the weighting scheme; no training data yet.
         if isinstance(k, bool) or not isinstance(k, (int, np.integer)) or k < 1:
             raise ValueError(f"k must be an integer >= 1, got {k!r}.")
         if weights not in VALID_WEIGHTS:
@@ -117,6 +120,7 @@ class KNNRegressor:
         >>> KNNRegressor(k=2).fit([0.0, 1.0, 3.0], [0.0, 1.0, 3.0]).k
         2
         """
+        # Validate the features and targets: same length, finite, and at least k points.
         X = _as_feature_matrix(X, "X")
         y = np.asarray(y, dtype=float).reshape(-1)
         if y.size != X.shape[0]:
@@ -125,6 +129,7 @@ class KNNRegressor:
             raise ValueError("y must not contain NaN or infinite values.")
         if self.k > y.size:
             raise ValueError(f"k = {self.k} is larger than the number of training points ({y.size}).")
+        # KNN has no parameters to fit: it simply stores the training data.
         self._X, self._y = X, y
         return self
 
@@ -180,6 +185,7 @@ class KNNRegressor:
         if queries.shape[1] != self._X.shape[1]:
             raise ValueError(f"X has {queries.shape[1]} features; the model was fitted "
                              f"with {self._X.shape[1]}.")
+        # Predict in blocks of queries to bound the memory of the distance matrix.
         blocks = []
         for start in range(0, queries.shape[0], QUERY_BLOCK_SIZE):
             blocks.append(self._predict_block(queries[start:start + QUERY_BLOCK_SIZE]))
@@ -221,6 +227,7 @@ class KNNDegradationModel:
 
     def __init__(self, compound, k=DEFAULT_K, weights=DEFAULT_WEIGHTS,
                  negative_tolerance_s=DEFAULT_NEGATIVE_TOLERANCE_S):
+        # Validate the compound and create the underlying KNN regressor.
         self.compound = check_compound(compound)
         self._knn = KNNRegressor(k, weights)
         if not negative_tolerance_s >= 0:
@@ -259,20 +266,25 @@ class KNNDegradationModel:
         >>> model.params()["n_stints"]
         3
         """
+        # Validate the data and check there are enough laps for the offsets plus one slope.
         data = prepare_stint_data(tyre_age, lap_time, stint_id)
         check_degrees_of_freedom(data, 1)
+        # Use the linear model only to estimate each stint's base-pace offset.
         linear = PolynomialDegradationModel(self.compound, degree=1).fit(
             data.tyre_age, data.lap_time, data.stint_labels[data.stint_index])
         self._offsets = linear._offsets
+        # Remove the offsets, leaving degradation plus noise, and store that for KNN on tyre age.
         adjusted = data.lap_time - self._offsets[data.stint_index]
         self._knn.fit(data.tyre_age, adjusted)
         self._data = data
         self._fitted = True
+        # Check that the KNN curve does not predict clearly negative degradation.
         self._constraint = check_non_negative(self.degradation, float(data.tyre_age.max()),
                                               self.negative_tolerance_s)
         return self
 
     def _require_fitted(self):
+        # Shared guard: every method that needs the fitted data calls this first.
         if not self._fitted:
             raise NotFittedError("Call fit() before using the model.")
 
@@ -303,6 +315,7 @@ class KNNDegradationModel:
         >>> model.degradation([5.0, 15.0]).round(6).tolist()
         [0.5, 1.5]
         """
+        # Average the stored degradation of the k laps with the nearest tyre age.
         self._require_fitted()
         return self._knn.predict(check_tyre_age(tyre_age))
 
@@ -335,6 +348,7 @@ class KNNDegradationModel:
         >>> model.predict([10.0], base_time=85.0).round(6).tolist()
         [86.0]
         """
+        # Lap time = base pace (default: median stint offset) + KNN degradation.
         self._require_fitted()
         base = self.base_time if base_time is None else float(base_time)
         if not np.isfinite(base) or base <= 0:
@@ -344,6 +358,7 @@ class KNNDegradationModel:
     @property
     def base_time(self):
         """float: median stint offset [s]."""
+        # Base pace of a "typical" car: the median of all stint offsets.
         self._require_fitted()
         return float(np.median(self._offsets))
 
@@ -365,6 +380,7 @@ class KNNDegradationModel:
         >>> model.stint_offsets()["2023_hungarian_grand_prix|VER|2"]  # doctest: +SKIP
         84.1
         """
+        # Pair each stint label with its offset.
         self._require_fitted()
         return {label: float(value) for label, value in zip(self._data.stint_labels, self._offsets)}
 
@@ -390,6 +406,7 @@ class KNNDegradationModel:
         >>> model.params()["k"], model.params()["negative_degradation_flag"]
         (3, False)
         """
+        # Collect the settings and diagnostics in one dictionary.
         self._require_fitted()
         return {
             "compound": self.compound,
@@ -426,6 +443,7 @@ class KNNDegradationModel:
         >>> print(model.summary().splitlines()[0])
         KNN degradation model, compound C3, k = 3, weights = uniform
         """
+        # Build a short text report from params().
         p = self.params()
         status = "VIOLATED" if p["negative_degradation_flag"] else "ok"
         return "\n".join([

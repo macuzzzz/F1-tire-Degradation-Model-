@@ -26,12 +26,14 @@ from pathlib import Path
 
 import matplotlib
 
+# Draw figures to files only (no window).
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from sklearn.neighbors import KNeighborsRegressor  # noqa: E402
 
+# Make the package in src/ importable when this script is run directly.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
@@ -62,15 +64,18 @@ from tyredeg.strategy import (  # noqa: E402
 )
 from tyredeg.validation import candidate_models, cross_validate, leave_one_race_out  # noqa: E402
 
+# Output folders (main() can redirect them, e.g. to benchmarks_latest).
 REPORTS = REPO_ROOT / "reports"
 FIGURES = REPORTS / "figures"
 
 # Wear ODE used for the solver benchmark (same as the Phase 3 study, D75).
+# Test ODE with a known exact solution, the same as in the Phase 3 study.
 A_WEAR, B_WEAR, LAPS = 0.05, 0.03, 40.0
 EXACT_END = float(exact_degradation([LAPS], A_WEAR, B_WEAR)[0])
 
 
 def wear_rhs(t, d):
+    # Right-hand side of the wear ODE dd/dn = a + b*d.
     return A_WEAR + B_WEAR * d
 
 
@@ -78,6 +83,7 @@ def wear_rhs(t, d):
 # ODE solvers: accuracy vs cost
 # ---------------------------------------------------------------------------
 def bench_ode(perf):
+    # Each fixed-step method at every step count: error, f-evaluations, FLOPs and run time.
     rows = []
     for name, solver in (("euler", euler), ("heun", heun), ("rk4", rk4)):
         for n in perf.ode_step_counts:
@@ -87,6 +93,7 @@ def bench_ode(perf):
             rows.append({"method": name, "setting": f"h = {h:.4g}", "steps": n, "rejected": 0, "nfev": nfev,
                          "flops": solver_flops(name, n), "error": abs(d[-1] - EXACT_END),
                          "time_mean_s": timing.mean, "time_std_s": timing.std, "time_min_s": timing.minimum})
+    # RK45 at every tolerance: steps, rejections, evaluations, FLOPs, error and time.
     for rtol in perf.rk45_rtols:
         atol = rtol * 1e-3
         _, d, nfev, stats = rk45(wear_rhs, (0.0, LAPS), 0.0, rtol=rtol, atol=atol)
@@ -97,6 +104,7 @@ def bench_ode(perf):
                      "flops": solver_flops("rk45", stats.n_accepted, n_rejected=stats.n_rejected),
                      "error": abs(d[-1] - EXACT_END), "time_mean_s": timing.mean,
                      "time_std_s": timing.std, "time_min_s": timing.minimum})
+    # The closed-form solution as the reference point (error 0).
     ages = np.arange(0.0, LAPS + 1.0)
     timing = time_function(lambda: exact_degradation(ages, A_WEAR, B_WEAR), perf.repeats, perf.warmup, perf.min_time_per_repeat_s)
     rows.append({"method": "exact", "setting": "closed form, 41 ages", "steps": 0, "rejected": 0, "nfev": 0,
@@ -105,6 +113,7 @@ def bench_ode(perf):
     table = pd.DataFrame(rows)
     table.to_csv(REPORTS / "phase8_ode.csv", index=False)
 
+    # Accuracy against cost (evaluations) and against run time, on log-log axes.
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.6))
     for method, group in table[table["method"] != "exact"].groupby("method", sort=False):
         errors = np.maximum(group["error"], 1e-17)
@@ -131,6 +140,7 @@ def bench_ode(perf):
 # ---------------------------------------------------------------------------
 def bench_knn(perf, seed):
     # Seed from config.yaml (random_seed, rule 11) so the synthetic data are reproducible.
+    # Seeded random data (rule 11): queries and training sets of increasing size.
     rng = np.random.default_rng(seed)
     queries = rng.uniform(0, 60, size=perf.knn_queries)
     rows = []
@@ -138,13 +148,16 @@ def bench_knn(perf, seed):
         X = rng.uniform(0, 60, size=n)              # continuous ages: no tied distances
         y = 0.06 * X + rng.normal(0, 0.4, size=n)
 
+        # My brute-force KNN against scikit-learn's kd-tree on the same data.
         def mine():
             return KNNRegressor(perf.knn_k).fit(X, y).predict(queries)
 
         def tree():
+            # scikit-learn's kd-tree KNN, the benchmark (it needs 2-D inputs).
             model = KNeighborsRegressor(n_neighbors=perf.knn_k, algorithm="kd_tree")
             return model.fit(X.reshape(-1, 1), y).predict(queries.reshape(-1, 1))
 
+        # Time and peak memory of each; check both give the same predictions.
         for name, func in (("mine (brute force)", mine), ("sklearn kd_tree", tree)):
             timing = time_function(func, perf.repeats, perf.warmup, perf.min_time_per_repeat_s)
             prediction, peak = peak_memory(func)
@@ -156,6 +169,7 @@ def bench_knn(perf, seed):
     table = pd.DataFrame(rows)
 
     # Empirical scaling exponent: slope of log(time) vs log(n), fitted with my least squares.
+    # Scaling exponent: slope of log(time) against log(n), fitted with my least squares.
     exponents = {}
     for method, group in table.groupby("method"):
         design = np.column_stack([np.ones(len(group)), np.log(group["n_train"].to_numpy(float))])
@@ -163,6 +177,7 @@ def bench_knn(perf, seed):
     table["time_exponent"] = table["method"].map(exponents)
     table.to_csv(REPORTS / "phase8_knn.csv", index=False)
 
+    # Time and memory against training-set size, on log-log axes.
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.6))
     for method, group in table.groupby("method"):
         axes[0].loglog(group["n_train"], group["time_min_s"], "o-",
@@ -187,6 +202,7 @@ def bench_knn(perf, seed):
 # ---------------------------------------------------------------------------
 def scaled_coefficients(unscaled, centre, half_range):
     """Exact coefficients in s = (x - c) / r of the polynomial sum_j a_j x^j (binomial expansion)."""
+    # Convert true coefficients in powers of x into powers of the scaled variable.
     scaled = np.zeros(len(unscaled))
     for j, a_j in enumerate(unscaled):
         for k in range(j + 1):
@@ -195,6 +211,7 @@ def scaled_coefficients(unscaled, centre, half_range):
 
 
 def bench_least_squares(perf):
+    # For each degree: exact coefficients and noise-free data, unscaled and scaled.
     age = np.arange(1.0, 42.0)
     rows = []
     for degree in perf.lsq_degrees:
@@ -204,12 +221,15 @@ def bench_least_squares(perf):
             centre, half_range = (21.0, 20.0) if scaled else (0.0, 1.0)
             X = polynomial_design_matrix(age, degree, centre, half_range)
             reference = scaled_coefficients(true, centre, half_range)
+            # My normal equations, QR with my back substitution, and NumPy's lstsq.
             methods = {
                 "normal equations (mine)": lambda: fit_linear_least_squares(X, y).coefficients,
                 "QR (numpy QR + my back substitution)": lambda: fit_linear_least_squares_qr(X, y).coefficients,
                 "SVD (numpy lstsq)": lambda: np.linalg.lstsq(X, y, rcond=None)[0],
             }
             for name, method in methods.items():
+                # Record accuracy, whether my solver refused (singular) or warned, and the run
+                # time.
                 status, error, timing = "ok", np.nan, None
                 with warnings.catch_warnings(record=True) as caught:
                     warnings.simplefilter("always", NearSingularWarning)
@@ -232,6 +252,7 @@ def bench_least_squares(perf):
     table = pd.DataFrame(rows)
     table.to_csv(REPORTS / "phase8_least_squares.csv", index=False)
 
+    # Error against the condition number of X, unscaled (left) and scaled (right).
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.6), sharey=True)
     for ax, scaled in zip(axes, (False, True)):
         subset = table[table["scaled"] == scaled]
@@ -253,10 +274,12 @@ def bench_least_squares(perf):
 # Strategy optimiser
 # ---------------------------------------------------------------------------
 def bench_strategy(perf, config, prepared, names):
+    # Build the real strategy inputs, plus a version with the stint limits removed.
     inputs = build_strategy_inputs(prepared.all_laps, prepared.clean, config, names)
     n, pit, k = inputs.total_laps, inputs.pit_loss, config.k_fuel
     relaxed = {c: replace(m, max_stint_laps=n - 1) for c, m in inputs.models.items()}
     rows = []
+    # Time brute force, secant and Newton with and without the limits.
     for label, models in (("with stint limits (6 feasible laps)", inputs.models),
                           ("limits relaxed (69 pit laps)", relaxed)):
         cases = {
@@ -270,6 +293,7 @@ def bench_strategy(perf, config, prepared, names):
             rows.append({"case": label, "method": method, "pit_lap": result.pit_laps[0],
                          "total_time_s": result.total_time, "iterations": result.iterations,
                          "nfev": result.nfev, "time_mean_s": timing.mean, "time_std_s": timing.std})
+    # Two-stop brute force for comparison.
     func = lambda: optimise_two_stop(("C3", "C4", "C4"), inputs.models, n, pit, k)  # noqa: E731
     result, timing = func(), time_function(func, perf.repeats, perf.warmup, perf.min_time_per_repeat_s)
     rows.append({"case": "two stops C3-C4-C4", "method": "brute force (pairs of laps)",
@@ -286,6 +310,8 @@ def bench_strategy(perf, config, prepared, names):
 # ---------------------------------------------------------------------------
 def compute_pipeline(config, train, strategy_data, names, implementation):
     """The compute part of the pipeline (no I/O): Phase 5 CV + Phase 6 strategy."""
+    # The full computation that was optimised: cross-validation of every candidate plus the
+    # strategy.
     folds_tables = []
     for compound in config.pirelli_compounds:
         laps = train.clean[train.clean["PirelliCompound"] == compound]
@@ -299,6 +325,7 @@ def compute_pipeline(config, train, strategy_data, names, implementation):
 
 
 def bench_profile(perf, config, names):
+    # Data preparation (I/O bound) is timed separately, then excluded from the comparison.
     strategy_races = [r for r in config.races if r.year in config.strategy.data_years]
     # Data preparation reads the warm caches (no network). It is I/O and
     # parsing, timed separately with fewer repeats and NOT optimised (D79).
@@ -307,14 +334,17 @@ def bench_profile(perf, config, names):
     strategy_data = prepare_laps(config, strategy_races)
 
     results, timings, rows = {}, {}, []
+    # Profile and time the original (loop) and the vectorised versions.
     for implementation in ("loop", "vectorised"):
         def run(implementation=implementation):
+            # The default argument fixes this loop's implementation inside the function.
             return compute_pipeline(config, train, strategy_data, names, implementation)
         results[implementation], table = profile_function(run, top=perf.profile_top)
         table.to_csv(REPORTS / f"phase8_profile_{'before' if implementation == 'loop' else 'after'}.csv",
                      index=False)
         timings[implementation] = time_function(run, perf.repeats, perf.warmup, perf.min_time_per_repeat_s)
 
+    # The two versions must give the same results: largest difference in metrics and race times.
     before_folds, before_rank = results["loop"]
     after_folds, after_rank = results["vectorised"]
     metric_columns = ["rmse", "mae", "max_abs_error", "bias", "r_squared"]
@@ -322,6 +352,7 @@ def bench_profile(perf, config, names):
     difference = float(np.nanmax(np.abs(before_folds.loc[applicable, metric_columns].to_numpy(float)
                                         - after_folds.loc[applicable, metric_columns].to_numpy(float))))
     rank_difference = float(np.max(np.abs(before_rank["total_time"].to_numpy() - after_rank["total_time"].to_numpy())))
+    # Time per version and the speed-up.
     for implementation, label in (("loop", "before (stint-by-stint loop)"), ("vectorised", "after (vectorised)")):
         t = timings[implementation]
         rows.append({"version": label, "time_mean_s": t.mean, "time_std_s": t.std, "time_min_s": t.minimum,
@@ -343,6 +374,7 @@ def main(config=None, sections=None, output_dir=None):
     ``output_dir`` replaces reports/ so that a pipeline run does not overwrite
     the committed Phase 8 evidence (D80) with this machine's timings.
     """
+    # Redirect the outputs if requested (the pipeline writes to benchmarks_latest).
     global REPORTS, FIGURES
     logging.getLogger("fastf1").setLevel(logging.ERROR)
     if config is None:
@@ -352,16 +384,20 @@ def main(config=None, sections=None, output_dir=None):
         FIGURES = REPORTS / "figures"
     perf = config.performance
     FIGURES.mkdir(parents=True, exist_ok=True)
+    # Save the machine details next to the timings.
     info = machine_info()
     (REPORTS / "phase8_machine.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
     print("Machine:", info)
 
+    # Sections to run: from the caller, the command line, or all.
     if sections is None:
         sections = sys.argv[1:] or ["ode", "knn", "least_squares", "strategy", "profile"]
+    # The frozen model selection is needed for the strategy benchmarks.
     from tyredeg.validation import load_selection
     selection = load_selection(REPO_ROOT / config.validation.selection_file)["selection"]
     names = {c: selection[c]["selected"] for c in config.strategy.compounds}
     pd.set_option("display.width", 220)
+    # Run the requested sections and print their tables.
     if "ode" in sections:
         print("\nODE solvers:\n", bench_ode(perf).round(8).to_string(index=False))
     if "knn" in sections:

@@ -83,6 +83,7 @@ def fill_total_laps(laps, total_laps_override=None):
     >>> fill_total_laps(df)["TotalLaps"].tolist()
     [70.0, 70.0]
     """
+    # Validate the table and its required columns.
     if not isinstance(laps, pd.DataFrame):
         raise TypeError(f"laps must be a pandas DataFrame, got {type(laps).__name__}.")
     if laps.empty:
@@ -91,7 +92,9 @@ def fill_total_laps(laps, total_laps_override=None):
         if column not in laps.columns:
             raise ValueError(f"laps is missing column {column!r}.")
 
+    # Work on a copy so the caller's table is not modified.
     result = laps.copy()
+    # An override sets the same race length for every race.
     if total_laps_override is not None:
         if isinstance(total_laps_override, bool) or not isinstance(total_laps_override, int):
             raise TypeError(f"total_laps_override must be an int, got {total_laps_override!r}.")
@@ -100,6 +103,7 @@ def fill_total_laps(laps, total_laps_override=None):
         result["TotalLaps"] = float(total_laps_override)
         return result
 
+    # Otherwise fill missing race lengths with the highest lap number seen in that race.
     highest_lap = result.groupby("RaceId")["LapNumber"].transform("max")
     missing = result["TotalLaps"].isna()
     for race_id in result.loc[missing, "RaceId"].unique():
@@ -113,6 +117,7 @@ def fill_total_laps(laps, total_laps_override=None):
 # ---------------------------------------------------------------------------
 def _check_k_fuel(k_fuel):
     """Raise if ``k_fuel`` is not a finite number >= 0."""
+    # k_fuel must be a finite number >= 0 (seconds per lap of fuel).
     if isinstance(k_fuel, bool) or not isinstance(k_fuel, (int, float, np.floating)):
         raise TypeError(f"k_fuel must be a number, got {k_fuel!r}.")
     if not np.isfinite(k_fuel) or k_fuel < 0:
@@ -160,16 +165,19 @@ def fuel_corrected_time(lap_time, lap_number, total_laps, k_fuel):
     >>> fuel_corrected_time(80.0, lap_number=11, total_laps=70, k_fuel=0.05)
     80.5
     """
+    # Check k_fuel and convert the inputs to float arrays.
     _check_k_fuel(k_fuel)
     lap_time = np.asarray(lap_time, dtype=float)
     lap_number = np.asarray(lap_number, dtype=float)
     total_laps = np.asarray(total_laps, dtype=float)
 
+    # Broadcast scalars and arrays to a common shape, or explain why they do not fit.
     try:
         lap_time, lap_number, total_laps = np.broadcast_arrays(lap_time, lap_number, total_laps)
     except ValueError as error:
         raise ValueError(f"lap_time, lap_number and total_laps have incompatible shapes: {error}") from error
 
+    # Lap times must be positive, lap numbers whole and between 1 and the race length.
     if not np.all(np.isfinite(lap_time)) or np.any(lap_time <= 0):
         raise ValueError("lap_time must be finite and > 0 (remove missing lap times first).")
     if not np.all(np.isfinite(total_laps)) or np.any(total_laps < 1):
@@ -179,6 +187,7 @@ def fuel_corrected_time(lap_time, lap_number, total_laps, k_fuel):
     if np.any(lap_number < 1) or np.any(lap_number > total_laps):
         raise ValueError("lap_number must lie between 1 and total_laps.")
 
+    # Correct each lap to the fuel load of lap 1: lap n carried (n - 1) laps less fuel.
     corrected = lap_time + k_fuel * (lap_number - 1.0)
     if corrected.ndim == 0:
         return float(corrected)
@@ -216,6 +225,7 @@ def add_fuel_corrected_times(laps, k_fuel):
     >>> add_fuel_corrected_times(df, 0.05)["FuelCorrectedTime"].tolist()
     [80.1, nan]
     """
+    # Validate the table and its required columns.
     if not isinstance(laps, pd.DataFrame):
         raise TypeError(f"laps must be a pandas DataFrame, got {type(laps).__name__}.")
     if laps.empty:
@@ -224,10 +234,12 @@ def add_fuel_corrected_times(laps, k_fuel):
         if column not in laps.columns:
             raise ValueError(f"laps is missing column {column!r}.")
 
+    # Only laps with a lap time can be corrected, and those need a known race length.
     timed = laps["LapTime"].notna()
     if laps.loc[timed, "TotalLaps"].isna().any():
         raise ValueError("TotalLaps is missing for some laps; call fill_total_laps first.")
 
+    # Add the column on a copy; laps without a time stay NaN.
     result = laps.copy()
     result[FUEL_CORRECTED_COLUMN] = np.nan
     if timed.any():
@@ -275,11 +287,13 @@ class PitLossEstimate:
     @property
     def iqr_s(self):
         """float: interquartile range q75 - q25 [s]."""
+        # Interquartile range: the spread of the middle half of the stops.
         return self.q75_s - self.q25_s
 
 
 def _driver_medians(clean_laps):
     """Return {(RaceId, Driver): median fuel-corrected clean lap time [s]}."""
+    # Each driver's typical clean lap time in each race (fuel-corrected).
     medians = clean_laps.groupby(["RaceId", "Driver"])[FUEL_CORRECTED_COLUMN].median()
     return medians.to_dict()
 
@@ -290,16 +304,19 @@ def _find_green_stops(laps):
     A stop is an in-lap on lap n followed by an out-lap on lap n+1 of the same
     driver in the same race. Both laps need a time and must be green.
     """
+    # Index every timed lap by (race, driver, lap) for quick lookup of the next lap.
     timed = laps[laps[FUEL_CORRECTED_COLUMN].notna()]
     by_lap = {}
     for row in timed.itertuples(index=False):
         by_lap[(row.RaceId, row.Driver, row.LapNumber)] = row
 
+    # A stop is an in-lap followed directly by the matching out-lap.
     pairs = []
     for row in timed[timed["IsPitInLap"].astype(bool)].itertuples(index=False):
         out_lap = by_lap.get((row.RaceId, row.Driver, row.LapNumber + 1))
         if out_lap is None or not bool(out_lap.IsPitOutLap):
             continue
+        # Keep only stops where both laps were green-flag (no safety car distortion).
         if bool(row.IsGreenLap) and bool(out_lap.IsGreenLap):
             pairs.append((row, out_lap))
     return pairs
@@ -340,6 +357,7 @@ def estimate_pit_loss(laps, clean_laps):
     >>> estimate = estimate_pit_loss(train_laps, train_clean)  # doctest: +SKIP
     >>> estimate.median_s, estimate.q25_s, estimate.q75_s  # doctest: +SKIP
     """
+    # Validate both tables and their required columns.
     for name, table in (("laps", laps), ("clean_laps", clean_laps)):
         if not isinstance(table, pd.DataFrame):
             raise TypeError(f"{name} must be a pandas DataFrame, got {type(table).__name__}.")
@@ -352,8 +370,10 @@ def estimate_pit_loss(laps, clean_laps):
         if column not in clean_laps.columns:
             raise ValueError(f"clean_laps is missing column {column!r}.")
 
+    # Reference pace: each driver's median clean lap in that race.
     medians = _driver_medians(clean_laps)
     rows = []
+    # Pit loss of each stop = in-lap + out-lap - two typical laps of the same driver.
     for in_lap, out_lap in _find_green_stops(laps):
         median_time = medians.get((in_lap.RaceId, in_lap.Driver))
         if median_time is None:
@@ -372,6 +392,7 @@ def estimate_pit_loss(laps, clean_laps):
             }
         )
 
+    # Summarise all stops: median as the estimate, quartiles as the spread.
     if not rows:
         raise ValueError("No green-flag pit stops with clean reference laps were found.")
     stops = pd.DataFrame(rows)

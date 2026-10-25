@@ -42,6 +42,7 @@ def test_time_function_runs_warmup_and_repeats():
 
 
 def test_time_function_measures_a_sleep():
+    # The timer must measure at least the known sleep time.
     import time
 
     result = time_function(lambda: time.sleep(0.01), repeats=3, warmup=0)
@@ -59,6 +60,7 @@ def test_time_function_calibrates_calls_for_short_functions():
 
 
 def test_time_function_long_calls_are_not_repeated():
+    # A call slower than the minimum time is run once per repeat, not looped.
     import time
 
     result = time_function(lambda: time.sleep(0.02), repeats=2, warmup=1, min_time_s=0.01)
@@ -68,6 +70,7 @@ def test_time_function_long_calls_are_not_repeated():
 @pytest.mark.parametrize("kwargs", [dict(repeats=0), dict(warmup=-1), dict(repeats=2.5),
                                     dict(min_time_s=0.0)])
 def test_time_function_rejects_bad_settings(kwargs):
+    # Invalid timer settings and non-callables are rejected.
     with pytest.raises(ValueError):
         time_function(lambda: None, **kwargs)
     with pytest.raises(TypeError):
@@ -82,10 +85,12 @@ def test_peak_memory_sees_numpy_allocations():
 
 
 def test_machine_info_and_profile():
+    # Machine details have the expected keys, and the profiler returns result and table.
     info = machine_info()
     assert {"python", "numpy", "cpu_count", "platform"} <= set(info)
 
     def work():
+        # Seeded, repeatable work for the profiler to measure.
         return sorted(np.random.default_rng(42).random(5000))
 
     result, table = profile_function(work, top=10)
@@ -115,6 +120,7 @@ def test_flops_scale_with_cost_of_f():
 
 
 def test_solver_flops_totals():
+    # FLOP totals: Euler 5 per step, RK4 25 per step, RK45 105 per attempted step + rejections.
     assert solver_flops("euler", 40) == 200
     assert solver_flops("rk4", 40) == 1000
     assert solver_flops("rk45", 10, n_rejected=2) == 12 * 105 + 2
@@ -147,6 +153,7 @@ def synthetic_laps(n_races=3, stints_per_race=14, seed=42):
 
 @pytest.fixture(scope="module")
 def specs():
+    # The candidate models of one compound, from the real config.yaml.
     return {spec.name: spec for spec in candidate_models("C3", load_config("config.yaml").models)}
 
 
@@ -154,6 +161,7 @@ def specs():
                                   "knn k=10 uniform", "knn k=50 distance"])
 @pytest.mark.parametrize("anchor", [1, 3, 5])
 def test_vectorised_prediction_equals_original_loop(specs, name, anchor):
+    # The vectorised prediction must give exactly the same values as the original loop.
     laps = synthetic_laps()
     model = specs[name].fit(laps["TyreLife"].to_numpy(), laps["FuelCorrectedTime"].to_numpy(),
                             laps["StintId"].to_numpy())
@@ -167,6 +175,7 @@ def test_vectorised_prediction_equals_original_loop(specs, name, anchor):
 
 
 def test_cross_validation_identical_with_both_implementations(specs):
+    # Both cross-validation implementations must give identical tables.
     laps = synthetic_laps()
     folds = leave_one_race_out(laps["RaceId"])
     for name in ("polynomial degree 1", "wear ODE", "knn k=25 uniform"):
@@ -177,6 +186,7 @@ def test_cross_validation_identical_with_both_implementations(specs):
 
 
 def test_unknown_implementation_is_rejected(specs):
+    # An unknown implementation name is rejected.
     laps = synthetic_laps()
     with pytest.raises(ValueError, match="implementation"):
         cross_validate(laps, specs["polynomial degree 1"], leave_one_race_out(laps["RaceId"]), 3,
@@ -184,6 +194,7 @@ def test_unknown_implementation_is_rejected(specs):
 
 
 def test_both_versions_reject_unscorable_input(specs):
+    # Both versions refuse data with no laps left to score.
     laps = synthetic_laps().head(3)
     model = specs["baseline (no degradation)"].fit(None, None, None)
     for predictor in (predict_held_out, predict_held_out_loop):

@@ -98,6 +98,7 @@ class OpenF1Client:
     """
 
     def __init__(self, cache_dir, request_delay_s=0.4, max_retries=5):
+        # Validate the cache folder, the delay between requests and the retry count.
         if not isinstance(cache_dir, (str, Path)) or str(cache_dir).strip() == "":
             raise TypeError("cache_dir must be a non-empty str or Path.")
         if isinstance(request_delay_s, bool) or not isinstance(request_delay_s, (int, float)):
@@ -108,6 +109,7 @@ class OpenF1Client:
             raise TypeError("max_retries must be an int.")
         if max_retries < 1:
             raise ValueError("max_retries must be >= 1.")
+        # Store the settings; the cache folder is created only when the first file is saved.
         self.cache_dir = Path(cache_dir)
         self.request_delay_s = float(request_delay_s)
         self.max_retries = max_retries
@@ -142,10 +144,12 @@ class OpenF1Client:
         >>> client.cache_path("laps", {"session_key": 9566, "driver_number": 1}).as_posix()
         'cache/openf1/laps/driver_number=1_session_key=9566.json'
         """
+        # Validate the endpoint name and the query parameters.
         if not isinstance(endpoint, str) or endpoint.strip() == "":
             raise TypeError("endpoint must be a non-empty string, e.g. 'laps'.")
         if not isinstance(params, dict):
             raise TypeError(f"params must be a dict, got {type(params).__name__}.")
+        # Sort the parameters so the same request always gives the same file name.
         parts = [f"{key}={params[key]}" for key in sorted(params)]
         file_name = ("_".join(parts) or "all") + ".json"
         return self.cache_dir / endpoint / file_name
@@ -176,11 +180,13 @@ class OpenF1Client:
         -------
         >>> OpenF1Client("cache/openf1").get("pit", session_key=9566)  # doctest: +SKIP
         """
+        # Serve from the disk cache if this request was made before (works offline).
         path = self.cache_path(endpoint, params)
         if path.is_file():
             with path.open("r", encoding="utf-8") as file:
                 return json.load(file)
 
+        # Otherwise download once and save the JSON for next time.
         records = self._download(endpoint, params)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as file:
@@ -189,33 +195,40 @@ class OpenF1Client:
 
     def _download(self, endpoint, params):
         """Fetch one endpoint from the network, retrying on HTTP 429."""
+        # Retry loop: only rate limiting (HTTP 429) is retried; other errors stop at once.
         url = f"{OPENF1_BASE_URL}/{endpoint}"
         for attempt in range(1, self.max_retries + 1):
+            # A network failure (no connection, timeout) cannot be fixed by retrying here.
             try:
                 response = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_S)
             except requests.RequestException as error:
                 raise RaceDataUnavailableError(f"Could not reach OpenF1 ({url}): {error}") from error
+            # Count real downloads and pause after each one to stay polite to the free API.
             self.downloads += 1
             time.sleep(self.request_delay_s)
 
+            # 200 = success: return the parsed JSON list.
             if response.status_code == 200:
                 return response.json()
             if response.status_code == 404:
                 # OpenF1 answers 404 when a query simply has no results
                 # (observed for a cancelled race); that is not an error.
                 return []
+            # 429 = too many requests: wait a little longer after each attempt, then retry.
             if response.status_code == 429:
                 # Rate-limited: wait a little longer after each attempt.
                 wait_s = 2.0 * attempt
                 logger.info("OpenF1 rate limit hit; waiting %.0f s (attempt %d)", wait_s, attempt)
                 time.sleep(wait_s)
                 continue
+            # 401/403 = refused: OpenF1 blocks free access during live sessions.
             if response.status_code in (401, 403):
                 raise RaceDataUnavailableError(
                     f"OpenF1 refused access to {endpoint} (HTTP {response.status_code}). "
                     f"OpenF1 blocks free access while a live F1 session is running; "
                     f"try again after the session. Server said: {response.text[:200]}"
                 )
+            # Any other status is unexpected; stop with a clear message.
             raise RaceDataUnavailableError(
                 f"OpenF1 returned HTTP {response.status_code} for {endpoint} {params}."
             )
@@ -261,6 +274,7 @@ def race_date_utc(year, event):
     >>> race_date_utc(2023, "Hungarian Grand Prix")  # needs the FastF1 schedule  # doctest: +SKIP
     ('Hungarian Grand Prix', Timestamp('2023-07-23 13:00:00'))
     """
+    # Validate the request, then look up the event in FastF1's free schedule.
     validate_year(year)
     validate_event(event)
     try:
@@ -269,8 +283,10 @@ def race_date_utc(year, event):
         raise RaceNotFoundError(f"FastF1 could not find {year} {event!r}: {error}") from error
     except Exception as error:
         raise RaceDataUnavailableError(f"Could not fetch the {year} schedule: {error}") from error
+    # Check the schedule matched the requested event, then get the race start in UTC.
     event_name = check_event_name(event_info["EventName"], event)
     race_start = pd.Timestamp(event_info.get_session_date("R", utc=True))
+    # Drop the time-zone marker so all times in the project are plain UTC.
     if race_start.tzinfo is not None:
         race_start = race_start.tz_convert("UTC").tz_localize(None)
     return event_name, race_start
@@ -309,8 +325,10 @@ def find_race_session(client, year, race_start):
     >>> find_race_session(FakeClient(), 2023, pd.Timestamp("2023-07-23 13:00"))["session_key"]
     9140
     """
+    # The race start must be a timestamp (from race_date_utc).
     if not isinstance(race_start, pd.Timestamp):
         raise TypeError(f"race_start must be a pandas Timestamp, got {type(race_start).__name__}.")
+    # List all race sessions of that year and keep the one starting on the race date.
     sessions = client.get("sessions", year=year, session_name="Race")
     matches = []
     for session in sessions:
@@ -319,6 +337,7 @@ def find_race_session(client, year, race_start):
         start = to_naive_utc(pd.Series([session["date_start"]])).iloc[0]
         if start.date() == race_start.date():
             matches.append(session)
+    # Anything other than exactly one match means the dates do not line up.
     if len(matches) != 1:
         raise RaceDataUnavailableError(
             f"Expected exactly one OpenF1 race session on {race_start.date()}, found {len(matches)}."
@@ -331,6 +350,7 @@ def find_race_session(client, year, race_start):
 # ---------------------------------------------------------------------------
 def _driver_lookup(drivers):
     """Return {car number: (driver code, team name)} from OpenF1 driver records."""
+    # Map each driver number to (three-letter code, team name).
     lookup = {}
     for driver in drivers:
         lookup[driver["driver_number"]] = (driver.get("name_acronym"), driver.get("team_name"))
@@ -339,6 +359,7 @@ def _driver_lookup(drivers):
 
 def _stint_for_lap(stints_of_driver, lap_number):
     """Return the stint record that contains ``lap_number``, or None."""
+    # Find the stint whose lap range contains this lap (open stints are skipped).
     for stint in stints_of_driver:
         lap_end = stint.get("lap_end")
         if lap_end is None:
@@ -357,6 +378,7 @@ def _tyre_life(stint, lap_number):
     FastF1's ``TyreLife``, which is 1 on the out-lap of a new set (seen in the
     2022 Bahrain data).
     """
+    # Tyre age = age at the start of the stint + laps run since, counting this lap.
     return stint["tyre_age_at_start"] + (lap_number - stint["lap_start"]) + 1
 
 
@@ -383,9 +405,11 @@ def build_laps_rows(laps, drivers, stints, pits, race_control):
     -------
     >>> rows = build_laps_rows(laps, drivers, stints, pits, rc)  # doctest: +SKIP
     """
+    # An empty session cannot be used.
     if len(laps) == 0:
         raise RaceDataUnavailableError("OpenF1 returned no laps for this session.")
 
+    # Prepare lookups: driver details, stints per driver, pit in-laps, and not-green time windows.
     driver_info = _driver_lookup(drivers)
     stints_by_driver = {}
     for stint in stints:
@@ -395,8 +419,10 @@ def build_laps_rows(laps, drivers, stints, pits, race_control):
     in_laps = {(pit["driver_number"], pit["lap_number"]) for pit in pits}
     not_green = non_green_intervals(messages_from_records(race_control))
 
+    # Lap start times as plain UTC timestamps, to compare with the flag windows.
     start_times = to_naive_utc(pd.Series([lap.get("date_start") for lap in laps]))
     rows = []
+    # Build one unified row per lap.
     for lap, start_time in zip(laps, start_times):
         number = lap["driver_number"]
         lap_number = lap["lap_number"]
@@ -418,6 +444,7 @@ def build_laps_rows(laps, drivers, stints, pits, race_control):
                 "IsGreenLap": is_green_lap(start_time, lap_time, not_green),
             }
         )
+    # Warn if pit in-laps and out-laps do not pair up (a data-quality check, not an error).
     table = pd.DataFrame(rows)
     _log_pit_consistency(table)
     return table
@@ -430,6 +457,7 @@ def _log_pit_consistency(table):
     the pit lane. Mismatches can happen legitimately (e.g. retiring in the
     pits) but many of them would suggest the in-lap interpretation is wrong.
     """
+    # Every in-lap should be followed by an out-lap of the same driver.
     out_laps = set(zip(table.loc[table["IsPitOutLap"], "DriverNumber"],
                        table.loc[table["IsPitOutLap"], "LapNumber"]))
     in_laps = table.loc[table["IsPitInLap"], ["DriverNumber", "LapNumber"]]
@@ -477,6 +505,7 @@ def load_openf1_laps(year, event, client):
     >>> client = OpenF1Client("cache/openf1")  # doctest: +SKIP
     >>> laps = load_openf1_laps(2023, "Hungarian Grand Prix", client)  # doctest: +SKIP
     """
+    # Validate the request: OpenF1 data start in 2023 and a client is needed.
     validate_year(year)
     validate_event(event)
     if year < OPENF1_FIRST_YEAR:
@@ -484,9 +513,11 @@ def load_openf1_laps(year, event, client):
     if not isinstance(client, OpenF1Client):
         raise TypeError(f"client must be an OpenF1Client, got {type(client).__name__}.")
 
+    # Find the race date and the matching OpenF1 session.
     event_name, race_start = race_date_utc(year, event)
     session = find_race_session(client, year, race_start)
     key = session["session_key"]
+    # Download (or read from cache) laps, drivers, stints, pit stops and race-control messages.
     rows = build_laps_rows(
         laps=client.get("laps", session_key=key),
         drivers=client.get("drivers", session_key=key),
@@ -494,5 +525,6 @@ def load_openf1_laps(year, event, client):
         pits=client.get("pit", session_key=key),
         race_control=client.get("race_control", session_key=key),
     )
+    # Add the race-level columns; OpenF1 does not report the race length (filled later).
     logger.info("Loaded %d laps for %d %s from OpenF1", len(rows), year, event_name)
     return finalise_laps(rows, year, event_name, unknown_total_laps(), "openf1")

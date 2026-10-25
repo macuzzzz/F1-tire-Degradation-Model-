@@ -55,6 +55,7 @@ DEFAULT_SAFETY = 0.9
 DEFAULT_MIN_FACTOR = 0.2
 DEFAULT_MAX_FACTOR = 10.0
 
+# Machine epsilon: the gap between 1.0 and the next float; used for round-off-level checks.
 EPS = np.finfo(float).eps
 
 # ---------------------------------------------------------------------------
@@ -95,6 +96,7 @@ ERROR_EXPONENT = -1.0 / 5.0
 class _CountingFunction:
     """Wrap ``f`` so every call is counted and the result has the right shape."""
 
+    # Wrap f so every evaluation is counted (nfev) and its output is checked once, in one place.
     def __init__(self, f, scalar_problem, dimension):
         self.f = f
         self.scalar_problem = scalar_problem
@@ -102,14 +104,18 @@ class _CountingFunction:
         self.calls = 0
 
     def __call__(self, t, y):
+        # Count this evaluation; nfev is reported to compare the cost of the methods.
         self.calls += 1
         # Scalar problems are given a plain float, so f can use math functions.
         argument = float(y[0]) if self.scalar_problem else y.copy()
+        # Turn the slope into a 1-D float array so scalar and vector problems are handled alike.
         slope = np.asarray(self.f(t, argument), dtype=float).reshape(-1)
+        # Catch a wrong-sized slope early, where the error message can explain it.
         if slope.size != self.dimension:
             raise ValueError(
                 f"f returned {slope.size} values but y has {self.dimension} components."
             )
+        # A NaN or infinite slope would silently poison every later step, so stop here.
         if not np.all(np.isfinite(slope)):
             raise ValueError(f"f returned a non-finite value at t = {t}.")
         return slope
@@ -117,15 +123,18 @@ class _CountingFunction:
 
 def _check_problem(f, t_span, y0):
     """Validate the common inputs; return (t0, t_end, y0 as 1-D array, is_scalar)."""
+    # Validate the inputs before any work so errors point at the caller's mistake.
     if not callable(f):
         raise TypeError("f must be callable as f(t, y).")
     if not isinstance(t_span, (tuple, list)) or len(t_span) != 2:
         raise TypeError("t_span must be a (t0, t_end) pair.")
+    # Convert the interval ends to floats and make sure they are usable numbers.
     t0, t_end = float(t_span[0]), float(t_span[1])
     if not (np.isfinite(t0) and np.isfinite(t_end)):
         raise ValueError("t_span must contain finite numbers.")
     if t_end <= t0:
         raise ValueError(f"t_end must be greater than t0, got t_span = {t_span}.")
+    # Accept a scalar or a 1-D array for y0; anything else is rejected.
     y0_array = np.asarray(y0, dtype=float)
     if y0_array.ndim > 1:
         raise ValueError("y0 must be a scalar or a 1-D array.")
@@ -133,17 +142,20 @@ def _check_problem(f, t_span, y0):
         raise ValueError("y0 must not be empty.")
     if not np.all(np.isfinite(y0_array)):
         raise ValueError("y0 must contain finite numbers.")
+    # Return a 1-D copy (so the caller's array is never modified) and whether y0 was a scalar.
     return t0, t_end, y0_array.reshape(-1).copy(), y0_array.ndim == 0
 
 
 def _time_grid(t0, t_end, h):
     """Time points t0, t0 + h, ..., t_end; the last step is shortened if needed."""
+    # Check the step size: a number, positive, finite and not longer than the interval.
     if isinstance(h, bool) or not isinstance(h, (int, float, np.floating)):
         raise TypeError(f"h must be a number, got {h!r}.")
     if not np.isfinite(h) or h <= 0:
         raise ValueError(f"h must be a finite number > 0, got {h}.")
     if h > t_end - t0:
         raise ValueError(f"h ({h}) is larger than the interval length ({t_end - t0}).")
+    # Number of steps needed to cover the interval with step h.
     ratio = (t_end - t0) / h
     # Rounding errors can make e.g. 2.0 / 0.1 = 19.999999999999996; treat
     # values within 1e-9 of a whole number as exact so no tiny last step appears.
@@ -151,6 +163,7 @@ def _time_grid(t0, t_end, h):
         n_steps = int(round(ratio))
     else:
         n_steps = int(np.ceil(ratio))
+    # Equally spaced times; the last one is set to t_end exactly (a shorter final step if needed).
     times = t0 + h * np.arange(n_steps + 1)
     times[-1] = t_end
     return times
@@ -158,6 +171,7 @@ def _time_grid(t0, t_end, h):
 
 def _format_output(times, states, scalar_problem):
     """Return y as 1-D for scalar problems, else shape (n_points, dimension)."""
+    # Stack the states into one array; scalar problems get a 1-D result like the input.
     states = np.array(states)
     if scalar_problem:
         return times, states[:, 0]
@@ -166,14 +180,18 @@ def _format_output(times, states, scalar_problem):
 
 def _fixed_step_solve(step, f, t_span, y0, h):
     """Run a one-step method ``step(f, t, y, h)`` over the whole time grid."""
+    # Validate the problem, wrap f for counting and build the time grid.
     t0, t_end, y, scalar_problem = _check_problem(f, t_span, y0)
     counted_f = _CountingFunction(f, scalar_problem, y.size)
     times = _time_grid(t0, t_end, h)
+    # Start from the initial state and advance one step at a time with the given formula.
     states = [y.copy()]
     for k in range(len(times) - 1):
+        # The last step may be shorter than h, so use the actual gap between grid points.
         step_size = times[k + 1] - times[k]
         y = step(counted_f, times[k], y, step_size)
         states.append(y.copy())
+    # Return the times, the states and how many times f was evaluated.
     t_out, y_out = _format_output(times, states, scalar_problem)
     return t_out, y_out, counted_f.calls
 
@@ -187,6 +205,7 @@ def _euler_step(f, t, y, h):
 
 
 def _heun_step(f, t, y, h):
+    # Slope at the start of the step (same as Euler).
     slope_start = f(t, y)
     # Predict the end point with Euler, then average the two slopes
     # (trapezoidal idea), which cancels the O(h^2) error term.
@@ -196,6 +215,7 @@ def _heun_step(f, t, y, h):
 
 
 def _rk4_step(f, t, y, h):
+    # Four slope samples: start, two at the midpoint, and the end of the step.
     k1 = f(t, y)
     k2 = f(t + h / 2, y + h / 2 * k1)
     k3 = f(t + h / 2, y + h / 2 * k2)
@@ -366,7 +386,9 @@ def _rms_error_norm(error, y_old, y_new, rtol, atol):
     absolute part matters when y is near 0 (the wear ODE starts at d = 0),
     the relative part when y is large.
     """
+    # Each component's error is measured against atol + rtol * |y| (absolute + relative tolerance).
     scale = atol + rtol * np.maximum(np.abs(y_old), np.abs(y_new))
+    # Root-mean-square over the components: <= 1 means the step meets the tolerance.
     return float(np.sqrt(np.mean((error / scale) ** 2)))
 
 
@@ -375,30 +397,40 @@ def _dormand_prince_step(f, t, y, h, k1):
 
     ``k1`` is the slope at (t, y), reused from the previous step (FSAL).
     """
+    # One row per stage slope; the first slope is reused from the previous step (FSAL).
     slopes = np.zeros((7, y.size))
     slopes[0] = k1
+    # Stages 2-7: each is evaluated at a point built from the previous slopes (Butcher tableau).
     for stage in range(1, 7):
         increment = h * (DP_A[stage, :stage] @ slopes[:stage])
         slopes[stage] = f(t + DP_C[stage] * h, y + increment)
+    # 5th-order solution (used to advance) and the difference to the 4th-order one (error
+    # estimate).
     y_new = y + h * (DP_B5 @ slopes)
     error = h * (DP_E @ slopes)
+    # The 7th slope is the slope at the new point, reused as k1 of the next step.
     return y_new, error, slopes[6]
 
 
 def _check_rk45_settings(rtol, atol, h0, max_steps, safety, min_factor, max_factor):
     """Raise for invalid RK45 settings."""
+    # Every tolerance and controller factor must be a finite positive number.
     for name, value in (("rtol", rtol), ("atol", atol), ("safety", safety),
                         ("min_factor", min_factor), ("max_factor", max_factor)):
         if isinstance(value, bool) or not isinstance(value, (int, float, np.floating)):
             raise TypeError(f"{name} must be a number, got {value!r}.")
         if not np.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be a finite number > 0, got {value}.")
+    # An optional initial step must be positive.
     if h0 is not None and (not np.isfinite(h0) or h0 <= 0):
         raise ValueError(f"h0 must be a finite number > 0, got {h0}.")
+    # max_steps protects against an endless loop when the tolerance cannot be met.
     if isinstance(max_steps, bool) or not isinstance(max_steps, (int, np.integer)) or max_steps < 1:
         raise ValueError(f"max_steps must be an integer >= 1, got {max_steps!r}.")
+    # The safety factor shrinks the proposed step, so it must not exceed 1.
     if safety > 1:
         raise ValueError(f"safety must be <= 1, got {safety}.")
+    # The step must be allowed to both shrink and grow.
     if not min_factor < 1 < max_factor:
         raise ValueError("Need min_factor < 1 < max_factor.")
 
@@ -469,18 +501,24 @@ def rk45(
     >>> bool(abs(float(y[-1]) - np.exp(-2.0)) < 1e-8)
     True
     """
+    # Check the settings and the problem, and count every evaluation of f.
     _check_rk45_settings(rtol, atol, h0, max_steps, safety, min_factor, max_factor)
     t0, t_end, y, scalar_problem = _check_problem(f, t_span, y0)
     counted_f = _CountingFunction(f, scalar_problem, y.size)
 
+    # First step: 1% of the interval unless the caller gives one (the controller fixes a poor
+    # guess).
     h = DEFAULT_INITIAL_STEP_FRACTION * (t_end - t0) if h0 is None else float(h0)
     t = t0
+    # Slope at the start; afterwards the FSAL property supplies it for free.
     k1 = counted_f(t, y)
     times, states = [t], [y.copy()]
     n_accepted, n_rejected = 0, 0
     previous_rejected = False
 
+    # Advance until the end of the interval, adapting h after every attempted step.
     while t < t_end:
+        # Give up rather than loop forever, and stop if h shrinks to round-off level.
         if n_accepted + n_rejected >= max_steps:
             raise ValueError(f"rk45 exceeded max_steps = {max_steps} at t = {t}.")
         if h < 10 * EPS * max(1.0, abs(t)):
@@ -488,6 +526,7 @@ def rk45(
         # Do not step past the end of the interval.
         h = min(h, t_end - t)
 
+        # Attempt one step and estimate its local error.
         y_new, error, k7 = _dormand_prince_step(counted_f, t, y, h, k1)
         err = _rms_error_norm(error, y, y_new, rtol, atol)
 
@@ -498,16 +537,23 @@ def rk45(
             times.append(t)
             states.append(y.copy())
             n_accepted += 1
+            # Grow the step for the next attempt (error well below tolerance means h can be
+            # larger).
             factor = max_factor if err == 0 else safety * err ** ERROR_EXPONENT
             factor = min(max_factor, factor)
+            # Right after a rejection, do not grow h again, which avoids a reject-accept-reject
+            # cycle.
             if previous_rejected:
                 factor = min(1.0, factor)
             previous_rejected = False
         else:
+            # Reject: stay at t and retry with a smaller step.
             n_rejected += 1
             factor = max(min_factor, safety * err ** ERROR_EXPONENT)
             previous_rejected = True
+        # Apply the new step size for the next attempt.
         h = h * factor
 
+    # Same output format as the fixed-step solvers, plus accepted/rejected step counts.
     t_out, y_out = _format_output(np.array(times), states, scalar_problem)
     return t_out, y_out, counted_f.calls, RK45Stats(n_accepted, n_rejected)

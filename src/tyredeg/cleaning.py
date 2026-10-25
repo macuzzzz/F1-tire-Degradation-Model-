@@ -88,6 +88,7 @@ RULE_ORDER = (
 # ---------------------------------------------------------------------------
 def _check_laps(laps):
     """Raise if ``laps`` is not a non-empty DataFrame with the required columns."""
+    # The table must be a non-empty DataFrame with every column the rules need.
     if not isinstance(laps, pd.DataFrame):
         raise TypeError(f"laps must be a pandas DataFrame, got {type(laps).__name__}.")
     if laps.empty:
@@ -103,6 +104,7 @@ def _check_columns(laps, columns):
     Used by the single-rule masks, which only need their own columns, so they
     can also be called on a small table (an empty table gives an empty mask).
     """
+    # A single rule only needs its own columns, so check just those.
     if not isinstance(laps, pd.DataFrame):
         raise TypeError(f"laps must be a pandas DataFrame, got {type(laps).__name__}.")
     missing = [column for column in columns if column not in laps.columns]
@@ -112,6 +114,7 @@ def _check_columns(laps, columns):
 
 def _check_outlier_k(outlier_k):
     """Raise if ``outlier_k`` is not a positive number."""
+    # The outlier threshold must be a finite positive number (booleans rejected).
     if isinstance(outlier_k, bool) or not isinstance(outlier_k, (int, float)):
         raise TypeError(f"outlier_k must be a number, got {outlier_k!r}.")
     if not np.isfinite(outlier_k) or outlier_k <= 0:
@@ -120,6 +123,7 @@ def _check_outlier_k(outlier_k):
 
 def _check_min_stint_laps(min_stint_laps):
     """Raise if ``min_stint_laps`` is not an integer >= 1."""
+    # The minimum stint length must be a whole number of laps >= 1.
     if isinstance(min_stint_laps, bool) or not isinstance(min_stint_laps, (int, np.integer)):
         raise TypeError(f"min_stint_laps must be an integer, got {min_stint_laps!r}.")
     if min_stint_laps < 1:
@@ -154,6 +158,7 @@ def missing_lap_time_mask(laps):
     >>> missing_lap_time_mask(pd.DataFrame({"LapTime": [80.0, float("nan")]})).tolist()
     [False, True]
     """
+    # True where no lap time was recorded.
     _check_columns(laps, ("LapTime",))
     return laps["LapTime"].isna()
 
@@ -185,6 +190,7 @@ def first_lap_mask(laps):
     >>> first_lap_mask(pd.DataFrame({"LapNumber": [1.0, 2.0]})).tolist()
     [True, False]
     """
+    # True for lap 1, which starts from a standstill.
     _check_columns(laps, ("LapNumber",))
     return laps["LapNumber"] == 1
 
@@ -218,6 +224,7 @@ def pit_laps_mask(laps):
     >>> pit_laps_mask(df).tolist()
     [False, True, True]
     """
+    # True for laps that include pit-lane time (driving in or out of the pits).
     _check_columns(laps, ("IsPitInLap", "IsPitOutLap"))
     return laps["IsPitInLap"].astype(bool) | laps["IsPitOutLap"].astype(bool)
 
@@ -251,6 +258,7 @@ def not_green_mask(laps):
     >>> not_green_mask(pd.DataFrame({"IsGreenLap": [True, False]})).tolist()
     [False, True]
     """
+    # True for laps with any yellow flag, safety car or red flag during the lap.
     _check_columns(laps, ("IsGreenLap",))
     return ~laps["IsGreenLap"].astype(bool)
 
@@ -283,6 +291,7 @@ def inaccurate_mask(laps):
     >>> inaccurate_mask(df).tolist()
     [False, True, False]
     """
+    # Only FastF1 data have this column; without it no lap is flagged.
     _check_columns(laps, ())
     if "IsAccurate" not in laps.columns:
         return pd.Series(False, index=laps.index)
@@ -320,6 +329,7 @@ def missing_stint_info_mask(laps):
     >>> missing_stint_info_mask(df).tolist()
     [False, True]
     """
+    # True when the stint, compound or tyre age is unknown.
     _check_columns(laps, ("Stint", "Compound", "TyreLife"))
     return laps["Stint"].isna() | laps["Compound"].isna() | laps["TyreLife"].isna()
 
@@ -363,6 +373,7 @@ def theil_sen_line(x, y):
     >>> round(intercept, 3), round(slope, 3)
     (79.9, 0.1)
     """
+    # Check the inputs: same-length 1-D arrays of at least 2 finite points.
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     if x.ndim != 1 or y.ndim != 1:
@@ -375,15 +386,19 @@ def theil_sen_line(x, y):
         raise ValueError("x and y must not contain NaN or infinite values.")
 
     # All pairs (i, j) with i < j: np.triu_indices gives their row/column indices.
+    # Slope between every pair of points (i < j).
     i, j = np.triu_indices(x.size, k=1)
     dx = x[j] - x[i]
     dy = y[j] - y[i]
     # Pairs with the same x have no defined slope, so they are skipped.
+    # Pairs at the same x have no defined slope; skip them.
     usable = dx != 0
     if np.any(usable):
+        # Theil-Sen slope: the median of all pairwise slopes (robust to outlying laps).
         slope = float(np.median(dy[usable] / dx[usable]))
     else:
         slope = 0.0
+    # Intercept: median of y - slope * x.
     intercept = float(np.median(y - slope * x))
     return intercept, slope
 
@@ -429,18 +444,23 @@ def robust_outlier_flags(x, y, outlier_k):
     >>> flags.tolist()
     [False, False, False, True, False, False]
     """
+    # Check the threshold; with fewer than 3 laps a spread cannot be estimated, so flag nothing.
     _check_outlier_k(outlier_k)
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     if x.size < MIN_LAPS_FOR_OUTLIER_TEST:
         return np.zeros(x.size, dtype=bool)
 
+    # Fit a robust line to the stint (lap time vs tyre age) and take the residuals.
     intercept, slope = theil_sen_line(x, y)
     residuals = y - (intercept + slope * x)
+    # Robust spread: 1.4826 x median absolute deviation estimates the standard deviation.
     deviations = np.abs(residuals - np.median(residuals))
     spread = MAD_TO_STD * np.median(deviations)
+    # All residuals equal (zero spread): no lap can be called an outlier.
     if spread == 0:
         return np.zeros(x.size, dtype=bool)
+    # A lap is an outlier if it is more than outlier_k robust standard deviations from the line.
     return deviations > outlier_k * spread
 
 
@@ -468,6 +488,7 @@ def outliers_mask(laps, outlier_k):
     -------
     >>> mask = outliers_mask(laps_after_rules_1_to_6, outlier_k=3.0)  # doctest: +SKIP
     """
+    # Apply the outlier test to every stint on its own (each stint has its own line).
     _check_outlier_k(outlier_k)
     flags = pd.Series(False, index=laps.index)
     for _, stint in laps.groupby(STINT_KEY, sort=False):
@@ -510,6 +531,7 @@ def short_stints_mask(laps, min_stint_laps):
     """
     _check_min_stint_laps(min_stint_laps)
     # transform("size") gives every lap the size of its own stint.
+    # Size of the stint each lap belongs to; flag laps in stints that are too short.
     stint_sizes = laps.groupby(STINT_KEY, sort=False)["Stint"].transform("size")
     return stint_sizes < min_stint_laps
 
@@ -519,6 +541,7 @@ def short_stints_mask(laps, min_stint_laps):
 # ---------------------------------------------------------------------------
 def _read_settings(config):
     """Return (outlier_k, min_stint_laps) from a Config-like object."""
+    # The config must define both cleaning thresholds, and they must be valid.
     for name in ("outlier_k", "min_stint_laps"):
         if not hasattr(config, name):
             raise TypeError(f"config must have an attribute '{name}'.")
@@ -563,9 +586,11 @@ def clean_laps(laps, config):
     >>> clean, report = clean_laps(laps, load_config("config.yaml"))  # doctest: +SKIP
     >>> report  # doctest: +SKIP
     """
+    # Validate the table and read the two thresholds from the config.
     _check_laps(laps)
     outlier_k, min_stint_laps = _read_settings(config)
 
+    # The eight rules, in the order they are applied; the last two need the thresholds.
     rules = {
         "missing_lap_time": missing_lap_time_mask,
         "first_lap": first_lap_mask,
@@ -577,6 +602,7 @@ def clean_laps(laps, config):
         "short_stints": lambda remaining: short_stints_mask(remaining, min_stint_laps),
     }
 
+    # Apply the rules one after another to the laps still remaining, counting removals per rule.
     remaining = laps
     rows = [{"rule": "input", "removed": 0, "remaining": len(laps)}]
     for name in RULE_ORDER:
@@ -584,5 +610,6 @@ def clean_laps(laps, config):
         remaining = remaining[~remove]
         rows.append({"rule": name, "removed": int(remove.sum()), "remaining": len(remaining)})
 
+    # Report: one row per rule with laps removed and laps remaining.
     report = pd.DataFrame(rows)
     return remaining.reset_index(drop=True), report

@@ -15,11 +15,13 @@ NUMERICS = load_config(Path(__file__).resolve().parents[1] / "config.yaml").nume
 
 
 def defaults_of(function):
+    # Default values of a function's keyword arguments, by name.
     return {name: p.default for name, p in inspect.signature(function).parameters.items()
             if p.default is not inspect.Parameter.empty}
 
 
 def test_ode_defaults_match_config():
+    # The ODE solver defaults must equal the values in config.yaml.
     ode = NUMERICS.ode
     assert defaults_of(ode_solvers.rk45) == {
         "rtol": ode.rtol, "atol": ode.atol, "h0": None, "max_steps": ode.max_steps,
@@ -29,6 +31,7 @@ def test_ode_defaults_match_config():
 
 
 def test_root_finding_defaults_match_config():
+    # The root-finding defaults must equal the values in config.yaml.
     settings = NUMERICS.root_finding
     expected = {"xtol": settings.xtol, "ftol": settings.ftol, "max_iter": settings.max_iter}
     assert defaults_of(root_finding.bisection) == expected
@@ -38,12 +41,14 @@ def test_root_finding_defaults_match_config():
 
 
 def test_differentiation_defaults_match_config():
+    # The differentiation step exponents must equal the values in config.yaml.
     assert differentiation.FORWARD_STEP_EXPONENT == NUMERICS.forward_step_exponent
     assert differentiation.CENTRAL_STEP_EXPONENT == NUMERICS.central_step_exponent
     assert differentiation.SECOND_STEP_EXPONENT == NUMERICS.second_step_exponent
 
 
 def test_linear_and_least_squares_defaults_match_config():
+    # The linear-solver and least-squares defaults must equal the values in config.yaml.
     threshold = NUMERICS.condition_warning_threshold
     assert defaults_of(linear_solvers.gaussian_elimination)["condition_threshold"] == threshold
     assert defaults_of(least_squares.fit_linear_least_squares)["condition_threshold"] == threshold

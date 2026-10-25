@@ -81,19 +81,24 @@ def prepare_laps(config, races):
     -------
     >>> prepared = prepare_laps(config, config.train_races)  # doctest: +SKIP
     """
+    # Need at least one race and a fuel coefficient.
     races = list(races)
     if not races:
         raise ValueError("races must contain at least one race.")
     if config.k_fuel is None:
         raise ValueError("fuel.k_fuel must be set in config.yaml.")
+    # Turn on the on-disk caches so data are downloaded only once.
     enable_cache(config.fastf1_cache_dir)
     client = OpenF1Client(config.openf1_cache_dir, config.openf1_request_delay_s,
                           config.openf1_max_retries)
+    # Load every race into one unified laps table.
     laps = load_many([(race.year, race.event, race.source) for race in races],
                      openf1_client=client)
+    # Map SOFT/MEDIUM/HARD to Pirelli C-numbers, fill race lengths and fuel-correct the times.
     laps = add_pirelli_compound(laps, load_allocation(config.allocation_file))
     laps = fill_total_laps(laps, config.total_laps_override)
     laps = add_fuel_corrected_times(laps, config.k_fuel)
+    # Apply the cleaning rules and label each clean lap with its stint id.
     clean, report = clean_laps(laps, config)
     clean = clean.copy()
     clean[STINT_COLUMN] = stint_labels_from_laps(clean)

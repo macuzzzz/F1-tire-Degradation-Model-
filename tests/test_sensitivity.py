@@ -28,6 +28,7 @@ from tyredeg.strategy import CompoundModel, LinearDegradation, cumulative_degrad
     ],
 )
 def test_coefficient_matches_exact_derivative(func, derivative, x0):
+    # The finite-difference coefficient must match the exact derivative and elasticity.
     result = sensitivity_coefficient(func, x0, relative_step=1e-3)
     assert result.derivative == pytest.approx(derivative(x0), rel=1e-6)
     assert result.elasticity == pytest.approx(derivative(x0) * x0 / func(x0), rel=1e-6)
@@ -62,11 +63,13 @@ def test_absolute_step_and_zero_cases():
      dict(absolute_step=-1.0)],
 )
 def test_invalid_steps(kwargs):
+    # Invalid step settings are rejected.
     with pytest.raises(ValueError):
         sensitivity_coefficient(lambda x: x, 1.0, **kwargs)
 
 
 def test_relative_step_at_zero_is_rejected():
+    # A relative step at x0 = 0 would be a zero step, so it is rejected.
     with pytest.raises(ValueError, match="x0 = 0"):
         sensitivity_coefficient(lambda x: x, 0.0, relative_step=0.01)
 
@@ -97,6 +100,7 @@ def test_one_at_a_time_and_tornado():
 
 
 def test_tornado_includes_nominal_when_both_variations_move_the_same_way():
+    # If both variations move the output the same way, the nominal value bounds the bar.
     oat = pd.DataFrame({"input": ["nominal", "m", "m"], "label": ["n", "x", "y"], "y": [5.0, 6.0, 7.0]})
     row = tornado_table(oat, "y").iloc[0]
     assert (row["low"], row["high"], row["low_change"]) == (5.0, 7.0, 0.0)
@@ -111,6 +115,7 @@ def test_linear_degradation_integral_and_optimum_sensitivity():
         return (b2 - b1 + a2 * (n + 0.5) - a1 / 2) / (a1 + a2)
 
     def numeric(a1):
+        # Optimal pit lap found numerically, to compare with the formula above.
         models = {"C3": CompoundModel("C3", LinearDegradation(a1), 80.0, 69),
                   "C4": CompoundModel("C4", LinearDegradation(0.09), 79.7, 69)}
         return optimise_continuous("C3", "C4", models, 70, 21.0, xtol=1e-10).continuous_root
@@ -132,6 +137,7 @@ def test_margin_against_pit_loss_has_slope_minus_one():
               "C4": CompoundModel("C4", LinearDegradation(0.09), 79.7, 69)}
 
     def margin(pit_loss):
+        # One-stop minus two-stop race time: positive means two stops are faster.
         one = optimise_brute_force("C3", "C4", models, 70, pit_loss).total_time
         two = optimise_two_stop(("C3", "C4", "C3"), models, 70, pit_loss).total_time
         return one - two

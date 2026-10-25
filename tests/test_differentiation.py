@@ -24,6 +24,7 @@ TRUNCATION_STEPS = 0.1 / 2.0 ** np.arange(4)
 
 
 def slope_of_log_error(steps, errors):
+    # Observed order of accuracy: slope of log(error) against log(h).
     slope, _ = np.polyfit(np.log(steps), np.log(errors), 1)
     return slope
 
@@ -33,6 +34,7 @@ def slope_of_log_error(steps, errors):
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("name", FUNCTION_FORMULAS)
 def test_order_of_accuracy_on_sin(name):
+    # The error must fall at the theoretical rate (order 1 or 2) as h shrinks.
     method, exact, order, _ = FUNCTION_FORMULAS[name]
     errors = [abs(method(np.sin, X0, h) - exact(X0)) for h in TRUNCATION_STEPS]
     assert abs(slope_of_log_error(TRUNCATION_STEPS, errors) - order) <= VERIFY.difference_order_tolerance
@@ -40,6 +42,7 @@ def test_order_of_accuracy_on_sin(name):
 
 @pytest.mark.parametrize("name", FUNCTION_FORMULAS)
 def test_vectorised_points(name):
+    # Arrays of points are differentiated element by element.
     method, exact, _, _ = FUNCTION_FORMULAS[name]
     x = np.array([0.5, 1.0, 2.0])
     result = method(np.sin, x)
@@ -97,6 +100,7 @@ def test_sample_formulas_are_second_order_including_ends(method, exact, order):
 
 @pytest.mark.parametrize("method", [fd.forward_difference_samples, fd.backward_difference_samples])
 def test_one_sided_sample_formulas_are_first_order(method):
+    # One-sided formulas on samples: the error halves when the spacing halves (order 1).
     spacings, errors = [], []
     for n_points in (21, 41, 81, 161):
         x, y = sampled_sin(n_points)
@@ -107,6 +111,7 @@ def test_one_sided_sample_formulas_are_first_order(method):
 
 
 def test_central_samples_match_numpy_gradient():
+    # My central differences on samples must equal NumPy's gradient (same 2nd-order edges).
     x, y = sampled_sin(30)
     np.testing.assert_allclose(fd.central_difference_samples(x, y),
                                np.gradient(y, x, edge_order=2), rtol=1e-12, atol=1e-12)
@@ -123,6 +128,7 @@ def test_second_difference_samples_exact_for_cubic():
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("name", FUNCTION_FORMULAS)
 def test_function_input_validation(name):
+    # Bad functions, points and step sizes are rejected.
     method = FUNCTION_FORMULAS[name][0]
     with pytest.raises(TypeError):
         method("sin", 1.0)
@@ -147,5 +153,6 @@ def test_function_input_validation(name):
     ],
 )
 def test_sample_input_validation(x, y, message):
+    # Malformed sample arrays are rejected with the expected message.
     with pytest.raises(ValueError, match=message):
         fd.central_second_difference_samples(x, y)

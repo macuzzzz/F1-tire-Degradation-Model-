@@ -1,6 +1,6 @@
 {
-  "created_utc": "2026-10-25T02:18:41+00:00",
-  "git_commit": "e1f86c89ae2a2869471a98c9ed5f8f532b55a030",
+  "created_utc": "2026-10-25T08:55:22+00:00",
+  "git_commit": "73a3241bbd398b15ff987362c78d8ecf29346f9f",
   "config": "config.yaml",
   "config_sha256": "82b5ecc98f8558cbbf2290df2d9bf503db1edb0d0f3732101cccbf151fb4d2ee",
   "stages": [
@@ -13,13 +13,13 @@
     "audit"
   ],
   "stage_durations_s": {
-    "numerics": 6.3,
-    "data": 2.77,
-    "validate": 4.3,
+    "numerics": 6.37,
+    "data": 3.24,
+    "validate": 4.15,
     "test": 0.0,
-    "strategy": 0.77,
-    "sensitivity": 8.5,
-    "audit": 5.0
+    "strategy": 0.72,
+    "sensitivity": 8.56,
+    "audit": 4.73
   },
   "results_sha256": {
     "audit_2025_bias_by_age.csv": "21b447711fd758733145f9d167f80f40e70c4350d0525634cf09342ab9314222",
@@ -72,7 +72,7 @@
     "phase7_tornado_L_star.csv": "fa09493a366b76578bbb669a9a93cd94764b79989c9d24e2a2ef419850a498eb",
     "phase7_tornado_margin.csv": "63432d4c4e5dd0e420d3ecd204dd84617696ca28a04a6989a8ce9b5bd965c21d",
     "phase7_tornado_pit_lap.csv": "5699548567cfd051f993ed4269de8e9f42a1994900d693646cb66f6acf06c43b",
-    "phase9_api_review.csv": "a9db4264a8c45bda548617ba40e1af7f7c519d261cdb4bdc47ab26c904c2a137",
+    "phase9_api_review.csv": "6cf8aa8f4bad46712eda0f57257b95c5887df61d696db99ce35db3a5acd91b51",
     "pipeline_cleaning_report.csv": "8103a264ccb2303f00b614f7a67ce7236a33b48c030de209090c06dfa28b20aa"
   }
 }

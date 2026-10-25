@@ -48,6 +48,7 @@ DEFAULT_FTOL = 1.0e-12
 DEFAULT_MAX_ITER = 100
 DEFAULT_DIVERGENCE_LIMIT = 1.0e10
 
+# Machine epsilon, used for the round-off safeguard in the stopping rule.
 EPS = np.finfo(float).eps
 # A step of at most this many floating-point spacings (eps * |x|) means x can
 # no longer change meaningfully. Like the pivot tolerance in
@@ -132,19 +133,23 @@ class RootResult:
 # ---------------------------------------------------------------------------
 def _check_settings(xtol, ftol, max_iter):
     """Raise for invalid tolerances or iteration limits."""
+    # Tolerances must be finite numbers >= 0 (0 switches that test off).
     for name, value in (("xtol", xtol), ("ftol", ftol)):
         if isinstance(value, bool) or not isinstance(value, (int, float, np.floating)):
             raise TypeError(f"{name} must be a number, got {value!r}.")
         if not np.isfinite(value) or value < 0:
             raise ValueError(f"{name} must be a finite number >= 0, got {value}.")
+    # With both tests switched off the iteration could never stop.
     if xtol == 0 and ftol == 0:
         raise ValueError("At least one of xtol and ftol must be > 0, or no stop is possible.")
+    # max_iter bounds the work if the method does not converge.
     if isinstance(max_iter, bool) or not isinstance(max_iter, (int, np.integer)) or max_iter < 1:
         raise ValueError(f"max_iter must be an integer >= 1, got {max_iter!r}.")
 
 
 def _evaluate(f, x):
     """Return f(x) as a float, raising if it is not finite."""
+    # Evaluate f and refuse non-finite values, which would break every later comparison.
     value = float(f(x))
     if not np.isfinite(value):
         raise DivergenceError(f"f({x}) is not finite ({value}).")
@@ -153,6 +158,7 @@ def _evaluate(f, x):
 
 def _check_iterate(x, divergence_limit, method):
     """Raise DivergenceError if x is non-finite or too large."""
+    # Stop an iteration that runs away (e.g. Newton jumping far from the root).
     if not np.isfinite(x) or abs(x) > divergence_limit:
         raise DivergenceError(f"{method} diverged: iterate {x} exceeds the limit {divergence_limit}.")
 
@@ -163,9 +169,12 @@ def _is_converged(step, f_value, x, xtol, ftol):
 
     A tolerance of 0 means that test is switched off (always passes).
     """
+    # Step test and residual test; a tolerance of 0 means that test is ignored.
     step_is_small = xtol == 0 or abs(step) <= xtol
     residual_is_small = ftol == 0 or abs(f_value) <= ftol
+    # Round-off safeguard: if x can no longer change, the best floating-point root is found.
     at_roundoff_level = abs(step) <= ROUNDOFF_STEPS * EPS * abs(x)
+    # Converged if both tests pass, or the step is already at round-off level.
     return (step_is_small and residual_is_small) or at_roundoff_level
 
 
@@ -214,20 +223,25 @@ def bisection(f, a, b, xtol=DEFAULT_XTOL, ftol=DEFAULT_FTOL, max_iter=DEFAULT_MA
     >>> round(result.root, 9), result.iterations
     (1.414213562, 38)
     """
+    # Check the settings and the bracket [a, b].
     _check_settings(xtol, ftol, max_iter)
     a, b = float(a), float(b)
     if not (np.isfinite(a) and np.isfinite(b)) or a >= b:
         raise ValueError(f"Need finite a < b, got a = {a}, b = {b}.")
+    # Evaluate both ends; an exact zero at an end is already the root.
     f_a, f_b = _evaluate(f, a), _evaluate(f, b)
     if f_a == 0:
         return RootResult(a, 0, np.array([a]))
     if f_b == 0:
         return RootResult(b, 0, np.array([b]))
+    # Bisection needs a sign change, which guarantees a root inside [a, b].
     if f_a * f_b > 0:
         raise NoSignChangeError(f"f(a) = {f_a} and f(b) = {f_b} have the same sign; no bracket.")
 
+    # Keep every midpoint so the convergence can be plotted.
     history = []
     for iteration in range(1, max_iter + 1):
+        # Halve the bracket: evaluate f at its midpoint.
         midpoint = (a + b) / 2.0
         f_mid = _evaluate(f, midpoint)
         history.append(midpoint)
@@ -293,22 +307,29 @@ def secant(
     >>> round(result.root, 12), result.iterations
     (1.414213562373, 7)
     """
+    # Check the settings and the two different starting points.
     _check_settings(xtol, ftol, max_iter)
     x0, x1 = float(x0), float(x1)
     if not (np.isfinite(x0) and np.isfinite(x1)) or x0 == x1:
         raise ValueError(f"Need two different finite starting points, got {x0} and {x1}.")
+    # Evaluate f at both starting points; every point visited is kept in the history.
     f0, f1 = _evaluate(f, x0), _evaluate(f, x1)
     history = [x0, x1]
     for iteration in range(1, max_iter + 1):
+        # Equal f values give a horizontal secant line, so no step can be computed.
         if f1 == f0:
             raise ZeroDerivativeError(f"f(x) is equal at {x0} and {x1}; secant slope is zero.")
+        # Secant step: the root of the straight line through the last two points.
         step = -f1 * (x1 - x0) / (f1 - f0)
         x_new = x1 + step
+        # Stop if the iterate runs away, then evaluate f at the new point.
         _check_iterate(x_new, divergence_limit, "secant")
         f_new = _evaluate(f, x_new)
         history.append(x_new)
+        # Stop when both the step and the residual are small (or the step is at round-off level).
         if _is_converged(step, f_new, x_new, xtol, ftol):
             return RootResult(x_new, iteration, np.array(history))
+        # Shift the window: the last two points become the basis of the next secant line.
         x0, f0, x1, f1 = x1, f1, x_new, f_new
     raise NotConvergedError(f"secant did not converge in {max_iter} iterations.")
 
@@ -364,23 +385,29 @@ def newton(
     >>> round(result.root, 12), result.iterations
     (1.414213562373, 5)
     """
+    # Check the settings and that a derivative function was given.
     _check_settings(xtol, ftol, max_iter)
     if not callable(fprime):
         raise TypeError("fprime must be callable.")
+    # Start point must be finite; evaluate f there.
     x = float(x0)
     if not np.isfinite(x):
         raise ValueError(f"x0 must be finite, got {x0}.")
     f_x = _evaluate(f, x)
     history = [x]
     for iteration in range(1, max_iter + 1):
+        # Derivative at the current point; a zero slope means the tangent never crosses zero.
         slope = _evaluate(fprime, x)
         if slope == 0:
             raise ZeroDerivativeError(f"f'(x) = 0 at x = {x}; Newton step undefined.")
+        # Newton step: the root of the tangent line at x.
         step = -f_x / slope
         x = x + step
+        # Stop if the iterate runs away, then evaluate f at the new point.
         _check_iterate(x, divergence_limit, "newton")
         f_x = _evaluate(f, x)
         history.append(x)
+        # Stop when both the step and the residual are small (or the step is at round-off level).
         if _is_converged(step, f_x, x, xtol, ftol):
             return RootResult(x, iteration, np.array(history))
     raise NotConvergedError(f"newton did not converge in {max_iter} iterations.")

@@ -28,11 +28,13 @@ from pathlib import Path
 
 import matplotlib
 
+# Draw figures to files only (no window), so the script also runs without a display.
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
+# Make the package in src/ importable when this script is run directly.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
@@ -63,6 +65,7 @@ from tyredeg.validation import (  # noqa: E402
     write_selection,
 )
 
+# Output folders, and bin edges for the residual analysis by tyre age and by lap number.
 REPORTS = REPO_ROOT / "reports"
 FIGURES = REPORTS / "figures"
 AGE_BINS = [0, 5, 10, 15, 20, 25, 30, 35, 45]
@@ -71,6 +74,7 @@ LAP_BINS = [0, 10, 20, 30, 40, 50, 60, 70]
 
 def git_commit():
     """Current git commit (recorded with the selection), or 'unknown'."""
+    # Record which code version produced the selection; "unknown" if git is not available.
     try:
         return subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True,
                               text=True, check=True).stdout.strip()
@@ -83,12 +87,14 @@ def git_commit():
 # ---------------------------------------------------------------------------
 def physical_checks(spec, laps, config):
     """Fit a candidate on all training laps; non-negativity and monotonicity (D53)."""
+    # Fit the candidate on all training laps and check its curve is non-negative and not falling.
     model = fit_on(spec, laps)
     max_age = float(laps[AGE_COLUMN].max())
     nonneg = check_non_negative(model.degradation, max_age,
                                 config.models.negative_degradation_tolerance_s,
                                 ages=np.arange(0.0, np.floor(max_age) + 1.0))
     mono = check_monotonic(model.degradation, max_age, config.validation.monotonic_tolerance_s)
+    # Return the check results and the fitted model (reused for the figures).
     return {"model": spec.name, "min_degradation": nonneg.min_degradation_s,
             "non_negative_ok": not nonneg.violated, "largest_drop": mono.largest_drop_s,
             "drops_over_tolerance": mono.n_drops_over_tolerance, "monotonic_ok": mono.ok}, model
@@ -96,6 +102,7 @@ def physical_checks(spec, laps, config):
 
 def selections_agree(frozen, recomputed):
     """True if the recomputed selection picks the same models as the frozen one."""
+    # The recomputed selection must pick the same model and family winners for every compound.
     for compound, choice in recomputed.items():
         saved = frozen.get(compound)
         if saved is None or saved["selected"] != choice["selected"] \
@@ -108,10 +115,13 @@ def run_cv(config, force=False, verify_only=False):
     """Cross-validation stage. ``verify_only`` recomputes everything but, instead of
     writing model_selection.json, checks that the recomputed selection equals the
     frozen one (used by run_pipeline.py after the test; D82)."""
+    # Firewall: refuse to overwrite the frozen selection once the test has been run (unless
+    # forced).
     if not verify_only:
         # After the test stage has run, the frozen selection must not be overwritten (C16).
         guard_cv_rerun(REPO_ROOT / config.validation.selection_file,
                        REPO_ROOT / config.validation.test_results_file, force)
+    # Use the training races only, and assert that no test race leaked into the data.
     races = config.train_races
     assert all(race.role == "train" for race in races)
     print(f"Cross-validation on TRAINING races only: {[r.year for r in races]} (test race not loaded)")
@@ -121,15 +131,19 @@ def run_cv(config, force=False, verify_only=False):
 
     fold_tables, summaries, residual_rows, rates, curves = [], [], [], [], {}
     selection = {}
+    # Cross-validate every candidate model for each compound.
     for compound in config.pirelli_compounds:
         laps = clean[clean["PirelliCompound"] == compound]
+        # One fold per training race.
         folds = leave_one_race_out(laps[RACE_COLUMN])
         specs = candidate_models(compound, config.models)
         predictions = {}
+        # Leave-one-race-out metrics for each candidate.
         for spec in specs:
             table, scored = cross_validate(laps, spec, folds, config.validation.anchor_laps)
             fold_tables.append(table.assign(compound=compound))
             predictions[spec.name] = scored
+        # Summarise over folds and add the physical checks (non-negative, monotonic).
         summary = summarize_folds(pd.concat([t for t in fold_tables if t["compound"].iloc[0] == compound]),
                                   config.validation.max_abs_bias_s_per_lap)
         checks, fitted = [], {}
@@ -138,11 +152,14 @@ def run_cv(config, force=False, verify_only=False):
                 row, fitted[spec.name] = physical_checks(spec, laps, config)
                 checks.append(row)
         summary = summary.merge(pd.DataFrame(checks), on="model")
+        # Accepted = not the baseline, beats it in every fold, small bias, and physically
+        # plausible.
         summary["accepted"] = (summary["family"] != "baseline") & summary["beats_baseline_all_folds"] \
             & summary["bias_ok"] & summary["non_negative_ok"] & summary["monotonic_ok"]
         summary.insert(0, "compound", compound)
         summaries.append(summary)
 
+        # Selection rule: family winners, then the simplest within one standard error of the best.
         complexity = {spec.name: spec.complexity for spec in specs}
         accepted = summary[summary["accepted"] | (summary["family"] == "baseline")]
         choice = select_models(accepted, complexity)
@@ -151,11 +168,13 @@ def run_cv(config, force=False, verify_only=False):
         selection[compound] = choice
         curves[compound] = (laps, {name: fitted[name] for name in choice["family_winners"].values()})
 
+        # Residuals of the selected model by tyre age and by lap number (leftover trends).
         selected_predictions = predictions[choice["selected"]]
         for label, column, bins in (("tyre age", AGE_COLUMN, AGE_BINS), ("lap number", LAP_COLUMN, LAP_BINS)):
             binned = binned_residuals(selected_predictions[column], selected_predictions["residual"], bins)
             residual_rows.append(binned.assign(compound=compound, versus=label, model=choice["selected"]))
 
+        # Linear wear rate with a bootstrap interval, used to rank the compounds.
         linear = PolynomialDegradationModel(compound, degree=1).fit(
             laps[AGE_COLUMN], laps["FuelCorrectedTime"], laps["StintId"])
         boot = linear.bootstrap(config.models.bootstrap_resamples, config.models.confidence_level,
@@ -164,9 +183,11 @@ def run_cv(config, force=False, verify_only=False):
                       "lower": float(boot.lower[0]), "upper": float(boot.upper[0]),
                       "bootstrap_se": float(boot.standard_errors[0]), "n_laps": int(len(laps))})
 
+    # Check for any fuel effect left after the fuel correction.
     fuel = leftover_fuel_effect(clean, list(config.pirelli_compounds), config.models.bootstrap_resamples,
                                 config.models.confidence_level, config.random_seed)
 
+    # Save all tables.
     REPORTS.mkdir(exist_ok=True)
     FIGURES.mkdir(exist_ok=True)
     pd.concat(fold_tables).to_csv(REPORTS / "phase5_cv_folds.csv", index=False)
@@ -177,6 +198,7 @@ def run_cv(config, force=False, verify_only=False):
     residuals = pd.concat(residual_rows)
     residuals.to_csv(REPORTS / "phase5_residual_bins.csv", index=False)
     pd.DataFrame([fuel.__dict__]).to_csv(REPORTS / "phase5_fuel_diagnostic.csv", index=False)
+    # After the test: verify only. Before the test: freeze the selection with its metadata.
     selection_path = (config.validation.selection_file if config.validation.selection_file.is_absolute()
                       else REPO_ROOT / config.validation.selection_file)
     if verify_only:
@@ -196,6 +218,7 @@ def run_cv(config, force=False, verify_only=False):
                         "rule": "best per family by mean LORO RMSE, then simplest accepted family "
                                 "winner within one SE of the best (D48, D51)",
                     })
+    # Draw the figures and print a summary.
     plot_cv(summary_all)
     plot_curves(curves)
     plot_residuals(residuals)
@@ -213,6 +236,7 @@ def run_cv(config, force=False, verify_only=False):
 
 
 def plot_cv(summary):
+    # One panel per compound: CV RMSE per candidate with 1-SE error bars, coloured by acceptance.
     compounds = summary["compound"].unique()
     fig, axes = plt.subplots(1, len(compounds), figsize=(6.5 * len(compounds), 5), sharey=True)
     axes = np.atleast_1d(axes)
@@ -230,16 +254,19 @@ def plot_cv(summary):
 
 
 def plot_curves(curves):
+    # One panel per compound: observed degradation (offsets removed) and the fitted family winners.
     fig, axes = plt.subplots(1, len(curves), figsize=(6.5 * len(curves), 4.5), sharey=True)
     axes = np.atleast_1d(axes)
     for ax, (compound, (laps, models)) in zip(axes, curves.items()):
         linear = PolynomialDegradationModel(compound, degree=1).fit(
             laps[AGE_COLUMN], laps["FuelCorrectedTime"], laps["StintId"])
+        # Remove each stint's offset (from the linear fit) and average by tyre age.
         index = np.searchsorted(np.unique(laps["StintId"]), laps["StintId"])
         adjusted = laps["FuelCorrectedTime"].to_numpy() - linear._offsets[index]
         means = pd.Series(adjusted).groupby(laps[AGE_COLUMN].to_numpy()).mean()
         ax.plot(means.index, means.to_numpy(), "k.", label="data: mean per tyre age (offsets removed)")
         ages = np.arange(0.0, laps[AGE_COLUMN].max() + 1.0)
+        # Fitted curves of the family winners.
         for name, model in models.items():
             ax.plot(ages, model.degradation(ages), label=name)
         ax.set_title(f"{compound}: fitted degradation (family winners)")
@@ -253,6 +280,7 @@ def plot_curves(curves):
 
 
 def plot_residuals(residuals):
+    # Rows = compounds; columns = residual vs tyre age and vs lap number, with 2-SE error bars.
     compounds = residuals["compound"].unique()
     fig, axes = plt.subplots(len(compounds), 2, figsize=(11, 3.8 * len(compounds)), squeeze=False)
     for row, compound in enumerate(compounds):
@@ -273,12 +301,15 @@ def plot_residuals(residuals):
 # Stage 2: the single final test
 # ---------------------------------------------------------------------------
 def run_test(config, force):
+    # Load the frozen selection and pass the firewall (refuses a repeat unless forced; logs the
+    # run).
     selection_path = REPO_ROOT / config.validation.selection_file
     results_path = REPO_ROOT / config.validation.test_results_file
     saved = load_selection(selection_path)
     guard_test_run(results_path, REPO_ROOT / config.validation.test_run_log, force)
     print(f"Model selection loaded from {selection_path.name} (created {saved['created_utc']}, "
           f"commit {saved['git_commit'][:7]}); it was fixed before this test run.")
+    # Fit on the training races, predict the test race, for the baseline and every family winner.
     train = prepare_laps(config, config.train_races).clean
     test = prepare_laps(config, config.test_races).clean
     rows = []
@@ -293,6 +324,7 @@ def run_test(config, force):
             rows.append({"compound": compound, "model": name, "selected": name == choice["selected"],
                          "test_races": ",".join(sorted(test_c[RACE_COLUMN].unique())),
                          **compute_metrics(scored["actual"], scored["predicted"])})
+    # Save the test results (the single evaluation) and print them.
     results = pd.DataFrame(rows)
     results.to_csv(results_path, index=False)
     pd.set_option("display.width", 200)
@@ -300,12 +332,14 @@ def run_test(config, force):
 
 
 def main():
+    # Command-line options: which stage, forced re-run, config file.
     parser = argparse.ArgumentParser(description="Phase 5 model comparison (two stages).")
     parser.add_argument("--stage", choices=("cv", "test"), required=True)
     parser.add_argument("--force", action="store_true",
                         help="allow a repeated test run (logged), or a CV re-run after the test")
     parser.add_argument("--config", default=str(REPO_ROOT / "config.yaml"))
     args = parser.parse_args()
+    # FastF1 logs every cache access; keep only its errors.
     logging.getLogger("fastf1").setLevel(logging.ERROR)
     config = load_config(args.config)
     if args.stage == "cv":

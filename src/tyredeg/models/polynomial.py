@@ -73,6 +73,7 @@ class PolynomialDegradationModel:
 
     def __init__(self, compound, degree=DEFAULT_DEGREE, scale=True, method="normal",
                  negative_tolerance_s=DEFAULT_NEGATIVE_TOLERANCE_S):
+        # Validate the settings: Pirelli compound, degree >= 1, scale flag, solver and tolerance.
         self.compound = check_compound(compound)
         if isinstance(degree, bool) or not isinstance(degree, (int, np.integer)) or degree < 1:
             raise ValueError(f"degree must be an integer >= 1, got {degree!r}.")
@@ -82,6 +83,7 @@ class PolynomialDegradationModel:
             raise ValueError(f"method must be one of {VALID_METHODS}, got {method!r}.")
         if not negative_tolerance_s >= 0:
             raise ValueError("negative_tolerance_s must be >= 0.")
+        # Store the settings; the model is not usable until fit() is called.
         self.degree = int(degree)
         self.scale = scale
         self.method = method
@@ -94,6 +96,7 @@ class PolynomialDegradationModel:
     # ------------------------------------------------------------------
     def _regressors(self, tyre_age):
         """Columns s^k - s0^k (k = 1..p), where s0 is the scaled age 0, so d(0) = 0."""
+        # Polynomial columns of the scaled tyre age, and the same columns at age 0.
         powers = polynomial_design_matrix(tyre_age, self.degree, self._centre, self._half_range)
         at_zero = polynomial_design_matrix(np.zeros(1), self.degree, self._centre, self._half_range)
         # Column 0 (the constant) is dropped: the stint offsets play that role.
@@ -130,46 +133,60 @@ class PolynomialDegradationModel:
         >>> PolynomialDegradationModel("C3").fit([1, 2, 3], [80.0, 80.1, 80.2]).params()["n_laps"]
         3
         """
+        # Validate the data and make sure there are enough laps and distinct ages for the degree.
         data = prepare_stint_data(tyre_age, lap_time, stint_id)
         dof = check_degrees_of_freedom(data, self.degree)
         if np.unique(data.tyre_age).size < self.degree + 1:
             raise ValueError(f"A degree-{self.degree} model needs at least "
                              f"{self.degree + 1} distinct tyre ages.")
+        # Scale tyre age to [-1, 1] over the training range to keep the least squares well
+        # conditioned.
         low, high = float(data.tyre_age.min()), float(data.tyre_age.max())
         self._centre = (low + high) / 2.0 if self.scale else 0.0
         self._half_range = (high - low) / 2.0 if self.scale else 1.0
 
+        # Regressors d(age) with d(0) = 0, one column per polynomial power.
         regressors = self._regressors(data.tyre_age)
+        # Remove each stint's mean from x and y so the stint offsets drop out (Frisch-Waugh-
+        # Lovell).
         within_x = np.column_stack([data.demean(column) for column in regressors.T])
         within_y = data.demean(data.lap_time)
+        # Least squares on the demeaned data gives the degradation coefficients.
         if self.method == "normal":
             result = fit_linear_least_squares(within_x, within_y)
         else:
             result = fit_linear_least_squares_qr(within_x, within_y)
 
+        # Keep what is needed later for prediction, offsets and reporting.
         self._data = data
         self._dof = dof
         self._scaled_coefficients = result.coefficients
         self._rss = result.residual_sum_of_squares
         self._condition = result.condition_estimate
+        # Each stint's offset is its mean lap time after removing the fitted degradation.
         self._offsets = data.stint_means(data.lap_time - regressors @ result.coefficients)
 
         # Covariance of the scaled coefficients: sigma^2 (Zw^T Zw)^-1, with the
         # residual degrees of freedom corrected for the stint offsets.
+        # Covariance of the coefficients: sigma^2 (X^T X)^-1 on the demeaned regressors.
         sigma_squared = self._rss / dof
         lu, permutation = lu_factor(within_x.T @ within_x)
         scaled_cov = sigma_squared * lu_solve(lu, permutation, np.eye(self.degree))
         # Convert to tyre-age units. Row/column 0 of T is the constant term,
         # which is identically 0 for d, so it is dropped.
+        # Convert coefficients and covariance from the scaled age back to ordinary tyre age.
         transform = unscaling_matrix(self.degree, self._centre, self._half_range)[1:, 1:]
         self._coefficients = transform @ self._scaled_coefficients
         self._covariance = transform @ scaled_cov @ transform.T
         self._fitted = True
         self.bootstrap_result = None
+        # Check that the fitted curve does not predict clearly negative degradation (tyres getting
+        # faster).
         self._constraint = check_non_negative(self.degradation, high, self.negative_tolerance_s)
         return self
 
     def _require_fitted(self):
+        # Shared guard: every method that needs the fitted parameters calls this first.
         if not self._fitted:
             raise NotFittedError("Call fit() before using the model.")
 
@@ -201,6 +218,7 @@ class PolynomialDegradationModel:
         >>> model.degradation([0.0, 10.0]).round(6).tolist()
         [0.0, 1.0]
         """
+        # Evaluate d at the requested ages with the scaled-coefficient form used in the fit.
         self._require_fitted()
         age = check_tyre_age(tyre_age)
         return self._regressors(age) @ self._scaled_coefficients
@@ -234,6 +252,7 @@ class PolynomialDegradationModel:
         >>> model.predict([4.0], base_time=90.0).round(6).tolist()
         [90.4]
         """
+        # Lap time = base pace (default: median stint offset) + degradation at that tyre age.
         self._require_fitted()
         base = self.base_time if base_time is None else float(base_time)
         if not np.isfinite(base) or base <= 0:
@@ -243,6 +262,7 @@ class PolynomialDegradationModel:
     @property
     def base_time(self):
         """float: median stint offset [s] (lap time of a new tyre for a typical car)."""
+        # Base pace of a "typical" car: the median of all stint offsets.
         self._require_fitted()
         return float(np.median(self._offsets))
 
@@ -264,6 +284,7 @@ class PolynomialDegradationModel:
         >>> model.stint_offsets()["2023_hungarian_grand_prix|VER|2"]  # doctest: +SKIP
         84.1
         """
+        # Pair each stint label with its fitted offset.
         self._require_fitted()
         return {label: float(value) for label, value in zip(self._data.stint_labels, self._offsets)}
 
@@ -287,6 +308,7 @@ class PolynomialDegradationModel:
         >>> PolynomialDegradationModel("C3", degree=2).parameter_names()
         ('c1 [s/lap]', 'c2 [s/lap^2]')
         """
+        # One name per coefficient, with units: c1 [s/lap], c2 [s/lap^2], ...
         names = ["c1 [s/lap]"]
         for k in range(2, self.degree + 1):
             names.append(f"c{k} [s/lap^{k}]")
@@ -319,13 +341,16 @@ class PolynomialDegradationModel:
         -------
         >>> result = model.bootstrap(200, seed=42)  # doctest: +SKIP
         """
+        # Bootstrap only makes sense on a fitted model (it reuses the training data).
         self._require_fitted()
 
+        # Refit a fresh model with the same settings on each resampled data set.
         def refit(ages, times, ids):
             clone = PolynomialDegradationModel(self.compound, self.degree, self.scale,
                                                self.method, self.negative_tolerance_s)
             return clone.fit(ages, times, ids)._coefficients
 
+        # Resample whole stints and keep the result for summary().
         self.bootstrap_result = stint_bootstrap(self._data, refit, self.parameter_names(),
                                                 n_resamples, confidence_level, seed)
         return self.bootstrap_result
@@ -352,6 +377,7 @@ class PolynomialDegradationModel:
         >>> PolynomialDegradationModel("C3").fit([1, 2, 3], [80.0, 80.1, 80.2]).params()["degree"]
         1
         """
+        # Collect the fitted values and diagnostics in one dictionary.
         self._require_fitted()
         return {
             "compound": self.compound,
@@ -392,6 +418,7 @@ class PolynomialDegradationModel:
         >>> print(model.summary().splitlines()[0])
         Polynomial degradation model, compound C3, degree 1
         """
+        # Build a short text report from params().
         p = self.params()
         lines = [
             f"Polynomial degradation model, compound {p['compound']}, degree {p['degree']}",

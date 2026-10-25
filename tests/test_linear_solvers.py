@@ -65,6 +65,7 @@ def test_lu_factors_reconstruct_permuted_matrix():
 
 
 def test_multiple_right_hand_sides():
+    # One factorisation can solve several right-hand sides, matching NumPy.
     rng = np.random.default_rng(42)
     A = rng.normal(size=(4, 4)) + 4 * np.eye(4)
     B = rng.normal(size=(4, 3))
@@ -73,6 +74,7 @@ def test_multiple_right_hand_sides():
 
 
 def test_input_matrix_is_not_modified():
+    # The solver works on a copy, so the caller's matrix is unchanged.
     A = np.array([[0.0, 1.0], [2.0, 3.0]])
     copy = A.copy()
     gaussian_elimination(A, [1.0, 5.0])
@@ -80,6 +82,7 @@ def test_input_matrix_is_not_modified():
 
 
 def test_triangular_solves():
+    # Forward and back substitution solve triangular systems exactly as NumPy does.
     L = np.array([[2.0, 0.0, 0.0], [1.0, 1.0, 0.0], [3.0, -1.0, 4.0]])
     b = np.array([2.0, 3.0, 10.0])
     np.testing.assert_allclose(forward_substitution(L, b), np.linalg.solve(L, b))
@@ -99,6 +102,7 @@ def test_condition_estimate_matches_numpy_1norm():
 
 
 def test_well_conditioned_matrix_does_not_warn():
+    # A well-conditioned system must not raise a near-singular warning.
     with warnings.catch_warnings():
         warnings.simplefilter("error", NearSingularWarning)
         result = gaussian_elimination(np.eye(3) * 2.0, [1.0, 1.0, 1.0])
@@ -120,6 +124,7 @@ def test_hilbert_below_threshold_does_not_warn():
 
 
 def test_custom_threshold():
+    # A lower threshold makes the warning appear for a smaller Hilbert matrix.
     H = hilbert(6)
     with pytest.warns(NearSingularWarning):
         gaussian_elimination(H, H @ np.ones(6), condition_threshold=1e6)
@@ -134,6 +139,7 @@ def test_custom_threshold():
     ],
 )
 def test_singular_matrices_raise(A):
+    # Each singular matrix raises SingularMatrixError.
     with pytest.raises(SingularMatrixError):
         gaussian_elimination(A, np.ones(len(A)))
 
@@ -149,10 +155,12 @@ def test_singular_matrices_raise(A):
     ],
 )
 def test_invalid_inputs(A, b):
+    # Invalid shapes and values are rejected.
     with pytest.raises(ValueError):
         gaussian_elimination(A, b)
 
 
 def test_invalid_threshold():
+    # A condition threshold below 1 makes no sense and is rejected.
     with pytest.raises(ValueError):
         gaussian_elimination(np.eye(2), [1.0, 1.0], condition_threshold=0.5)

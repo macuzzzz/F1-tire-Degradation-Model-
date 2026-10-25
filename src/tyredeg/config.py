@@ -55,8 +55,10 @@ def _require_int(value, name, minimum=None, maximum=None):
     ``bool`` is rejected explicitly because in Python ``True`` is an ``int``
     (``True == 1``), so ``random_seed: true`` would otherwise be accepted.
     """
+    # Reject booleans explicitly: in Python True is also an int.
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"'{name}' must be an integer, got {value!r}.")
+    # Enforce the optional lower and upper bounds.
     if minimum is not None and value < minimum:
         raise ValueError(f"'{name}' must be >= {minimum}, got {value}.")
     if maximum is not None and value > maximum:
@@ -69,6 +71,7 @@ def _require_float(value, name, minimum=None, strictly_positive=False):
 
     Integers are accepted (YAML reads ``90`` as an int) and converted to float.
     """
+    # Accept ints and floats (YAML may give either), but not booleans or strings.
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"'{name}' must be a number, got {value!r}.")
     value = float(value)
@@ -76,6 +79,7 @@ def _require_float(value, name, minimum=None, strictly_positive=False):
     # checks below; reject it explicitly.
     if value != value:
         raise ValueError(f"'{name}' must not be NaN.")
+    # Enforce the optional positivity and lower bound.
     if strictly_positive and value <= 0:
         raise ValueError(f"'{name}' must be > 0, got {value}.")
     if minimum is not None and value < minimum:
@@ -85,6 +89,7 @@ def _require_float(value, name, minimum=None, strictly_positive=False):
 
 def _require_string(value, name):
     """Return ``value`` stripped of surrounding spaces if it is a non-empty string."""
+    # A string that is not empty after removing surrounding spaces.
     if not isinstance(value, str):
         raise TypeError(f"'{name}' must be a string, got {value!r}.")
     if value.strip() == "":
@@ -98,8 +103,10 @@ def _require_string_list(value, name, allowed=None):
     ``None`` means "no filter" (keep everything). An empty list is rejected
     because it would silently select nothing.
     """
+    # null means "no filter" (e.g. all teams), so it is passed through as None.
     if value is None:
         return None
+    # Otherwise it must be a non-empty list of allowed strings.
     if not isinstance(value, list):
         raise TypeError(f"'{name}' must be a list of strings or null, got {value!r}.")
     if len(value) == 0:
@@ -117,6 +124,7 @@ def _require_string_list(value, name, allowed=None):
 
 def _require_section(raw, name):
     """Return the sub-dictionary ``raw[name]``, raising if it is missing or not a mapping."""
+    # A top-level section such as 'fuel:' must exist and be a mapping.
     if name not in raw:
         raise ValueError(f"Missing section '{name}' in the configuration.")
     section = raw[name]
@@ -131,6 +139,7 @@ def _require_key(section, key, section_name):
     The key must be present even when its value is ``null``, so that a
     misspelt key name is caught rather than silently treated as "not set".
     """
+    # A missing key is reported with the section it belongs to.
     if key not in section:
         raise ValueError(f"Missing key '{key}' in section '{section_name}'.")
     return section[key]
@@ -396,11 +405,13 @@ class Config:
     @property
     def train_races(self):
         """tuple of RaceSpec: the races with role ``"train"``."""
+        # Races used for fitting and model selection.
         return tuple(race for race in self.races if race.role == "train")
 
     @property
     def test_races(self):
         """tuple of RaceSpec: the races with role ``"test"`` (held out)."""
+        # Races held out for the single final test.
         return tuple(race for race in self.races if race.role == "test")
 
 
@@ -409,9 +420,11 @@ class Config:
 # ---------------------------------------------------------------------------
 def _parse_race(entry, index, last_year):
     """Validate one entry of ``data.races`` and return a :class:`RaceSpec`."""
+    # Name used in error messages, e.g. "data.races[2]".
     name = f"data.races[{index}]"
     if not isinstance(entry, dict):
         raise TypeError(f"'{name}' must be a mapping with year/event/role, got {entry!r}.")
+    # Each race needs a valid year, an event name, a train/test role and a data source.
     year = _require_int(
         _require_key(entry, "year", name), f"{name}.year", FIRST_SUPPORTED_YEAR, last_year
     )
@@ -422,6 +435,7 @@ def _parse_race(entry, index, last_year):
     source = _require_string(_require_key(entry, "source", name), f"{name}.source")
     if source not in VALID_SOURCES:
         raise ValueError(f"'{name}.source' must be one of {VALID_SOURCES}, got {source!r}.")
+    # OpenF1 has no free data before 2023, so catch that combination here.
     if source == "openf1" and year < OPENF1_FIRST_YEAR:
         raise ValueError(
             f"'{name}': OpenF1 only has free data from {OPENF1_FIRST_YEAR} onward, got {year}."
@@ -436,15 +450,18 @@ def _parse_races(raw_races):
     race is listed twice. A duplicated race could end up in both the training
     and the test set, which would leak test information into model selection.
     """
+    # The race list must not be empty.
     if not isinstance(raw_races, list) or len(raw_races) == 0:
         raise ValueError("'data.races' must be a non-empty list of races.")
 
     # A season cannot be later than the current calendar year.
+    # Validate every race entry; a season cannot be later than the current year.
     last_year = datetime.date.today().year
     races = []
     for index, entry in enumerate(raw_races):
         races.append(_parse_race(entry, index, last_year))
 
+    # The same race listed twice could end up in both training and test data (leakage).
     seen = set()
     for race in races:
         key = (race.year, race.event.casefold())
@@ -452,6 +469,7 @@ def _parse_races(raw_races):
             raise ValueError(f"Race {race.year} {race.event!r} is listed more than once.")
         seen.add(key)
 
+    # Both a training race and a test race are required.
     roles = {race.role for race in races}
     if "train" not in roles:
         raise ValueError("At least one race must have role 'train'.")
@@ -466,6 +484,7 @@ def _optional(value, check, *args, **kwargs):
     Used for keys that are still ``null`` because they are decided in a later
     phase: the range is only checked once a value has been filled in.
     """
+    # Keys set to null are decided later: only check a value that is actually given.
     if value is None:
         return None
     return check(value, *args, **kwargs)
@@ -478,6 +497,7 @@ def _parse_k_fuel_range(fuel, k_fuel):
     ``k_fuel`` must lie inside the range, otherwise the sensitivity analysis
     would not bracket the value actually used.
     """
+    # The k_fuel range for the sensitivity analysis: both ends given or both null.
     low = _optional(_require_key(fuel, "k_fuel_min", "fuel"), _require_float, "fuel.k_fuel_min", 0.0)
     high = _optional(_require_key(fuel, "k_fuel_max", "fuel"), _require_float, "fuel.k_fuel_max", 0.0)
     if low is None and high is None:
@@ -486,6 +506,7 @@ def _parse_k_fuel_range(fuel, k_fuel):
         raise ValueError("'fuel.k_fuel_min' and 'fuel.k_fuel_max' must both be set or both be null.")
     if low > high:
         raise ValueError(f"'fuel.k_fuel_min' ({low}) must be <= 'fuel.k_fuel_max' ({high}).")
+    # The nominal k_fuel must lie inside its own sensitivity range.
     if k_fuel is not None and not low <= k_fuel <= high:
         raise ValueError(f"'fuel.k_fuel' ({k_fuel}) must lie within [{low}, {high}].")
     return (low, high)
@@ -493,6 +514,7 @@ def _parse_k_fuel_range(fuel, k_fuel):
 
 def _positive_float(section, key, section_name):
     """Read ``section[key]`` and require a finite number > 0."""
+    # A required key whose value must be a finite number > 0.
     return _require_float(
         _require_key(section, key, section_name), f"{section_name}.{key}", strictly_positive=True
     )
@@ -500,6 +522,7 @@ def _positive_float(section, key, section_name):
 
 def _parse_ode(section):
     """Validate ``numerics.ode``."""
+    # Read every ODE setting as a positive number (max_steps as an integer >= 1).
     name = "numerics.ode"
     settings = OdeSettings(
         rtol=_positive_float(section, "rtol", name),
@@ -511,6 +534,7 @@ def _parse_ode(section):
         max_factor=_positive_float(section, "max_factor", name),
     )
     # A safety factor above 1 would aim for steps that are expected to fail.
+    # The safety factor only shrinks steps, and the step must be able to shrink and grow.
     if settings.safety > 1:
         raise ValueError(f"'{name}.safety' must be <= 1, got {settings.safety}.")
     # The controller must be able to shrink (min < 1) and to grow (max > 1).
@@ -523,6 +547,7 @@ def _parse_ode(section):
 
 def _parse_root_finding(section):
     """Validate ``numerics.root_finding``."""
+    # Read the root-finding tolerances, iteration limit and divergence limit.
     name = "numerics.root_finding"
     return RootFindingSettings(
         xtol=_positive_float(section, "xtol", name),
@@ -534,6 +559,7 @@ def _parse_root_finding(section):
 
 def _parse_numerics(raw):
     """Validate the ``numerics`` section (Phase 3 defaults)."""
+    # Each finite-difference step exponent must be between 0 and 1.
     numerics = _require_section(raw, "numerics")
     differentiation = _require_section(numerics, "differentiation")
     exponents = {}
@@ -543,6 +569,7 @@ def _parse_numerics(raw):
         if value >= 1:
             raise ValueError(f"'numerics.differentiation.{key}' must be < 1, got {value}.")
         exponents[key] = value
+    # Linear-solver warning threshold and the polynomial input-scaling switch.
     linear = _require_section(numerics, "linear")
     least_squares = _require_section(numerics, "least_squares")
     scale = _require_key(least_squares, "scale_polynomial_inputs", "numerics.least_squares")
@@ -550,6 +577,7 @@ def _parse_numerics(raw):
         raise TypeError(
             f"'numerics.least_squares.scale_polynomial_inputs' must be true/false, got {scale!r}."
         )
+    # Assemble all numerical defaults into one validated object.
     return NumericsSettings(
         ode=_parse_ode(_require_section(numerics, "ode")),
         root_finding=_parse_root_finding(_require_section(numerics, "root_finding")),
@@ -563,6 +591,7 @@ def _parse_numerics(raw):
 
 def _parse_verification(raw):
     """Validate the ``verification`` section (test acceptance tolerances)."""
+    # Every verification tolerance must be a positive number.
     section = _require_section(raw, "verification")
     values = {}
     for key in VerificationSettings.__dataclass_fields__:
@@ -576,6 +605,7 @@ VALID_KNN_WEIGHTS = ("uniform", "distance")
 
 def _int_list(value, name, minimum):
     """Validate a non-empty list of distinct integers >= minimum."""
+    # A non-empty list of distinct integers, each at least 'minimum'.
     if not isinstance(value, list) or len(value) == 0:
         raise TypeError(f"'{name}' must be a non-empty list of integers, got {value!r}.")
     items = tuple(_require_int(item, f"{name} entry", minimum) for item in value)
@@ -586,11 +616,13 @@ def _int_list(value, name, minimum):
 
 def _parse_models(raw):
     """Validate the ``models`` section (Phase 4)."""
+    # Read the three model sections.
     models = _require_section(raw, "models")
     poly = _require_section(models, "polynomial")
     ode = _require_section(models, "wear_ode")
     knn = _require_section(models, "knn")
 
+    # Polynomial: candidate degrees and a default that is one of them.
     degrees = _int_list(_require_key(poly, "candidate_degrees", "models.polynomial"),
                         "models.polynomial.candidate_degrees", 1)
     default_degree = _require_int(_require_key(poly, "default_degree", "models.polynomial"),
@@ -598,6 +630,7 @@ def _parse_models(raw):
     if default_degree not in degrees:
         raise ValueError("'models.polynomial.default_degree' must be one of the candidate degrees.")
 
+    # Wear ODE: the search bracket for b must be [low, high] with low < high.
     bracket = _require_key(ode, "b_bracket", "models.wear_ode")
     if not isinstance(bracket, list) or len(bracket) != 2:
         raise TypeError("'models.wear_ode.b_bracket' must be a [low, high] list.")
@@ -605,6 +638,7 @@ def _parse_models(raw):
     high = _require_float(bracket[1], "models.wear_ode.b_bracket[1]")
     if not low < high:
         raise ValueError("'models.wear_ode.b_bracket' must satisfy low < high.")
+    # The ODE solver must be a known one, and at least one search tolerance must be positive.
     solver = _require_string(_require_key(ode, "solver", "models.wear_ode"), "models.wear_ode.solver")
     if solver not in VALID_ODE_SOLVERS:
         raise ValueError(f"'models.wear_ode.solver' must be one of {VALID_ODE_SOLVERS}, got {solver!r}.")
@@ -613,6 +647,7 @@ def _parse_models(raw):
     if b_xtol == 0 and b_ftol == 0:
         raise ValueError("'models.wear_ode': b_xtol and b_ftol cannot both be 0.")
 
+    # KNN: candidate k values, weightings, and a default from among them.
     candidate_k = _int_list(_require_key(knn, "candidate_k", "models.knn"), "models.knn.candidate_k", 1)
     weights = _require_string_list(_require_key(knn, "candidate_weights", "models.knn"),
                                    "models.knn.candidate_weights", VALID_KNN_WEIGHTS)
@@ -624,10 +659,12 @@ def _parse_models(raw):
     if default_weights not in weights:
         raise ValueError("'models.knn.default_weights' must be one of the candidate weightings.")
 
+    # Confidence level for bootstrap intervals must lie in (0, 1).
     confidence = _positive_float(models, "confidence_level", "models")
     if confidence >= 1:
         raise ValueError(f"'models.confidence_level' must be < 1, got {confidence}.")
 
+    # Assemble all model settings into one validated object.
     return ModelSettings(
         candidate_degrees=degrees,
         default_degree=default_degree,
@@ -656,9 +693,11 @@ def _parse_models(raw):
 
 def _parse_validation(raw):
     """Validate the ``validation`` section (Phase 5)."""
+    # Validation settings: anchor laps, acceptance thresholds and the firewall files.
     section = _require_section(raw, "validation")
     name = "validation"
 
+    # Read a file path from the section.
     def path(key):
         return Path(_require_string(_require_key(section, key, name), f"{name}.{key}"))
 
@@ -675,6 +714,7 @@ def _parse_validation(raw):
 
 
 def _require_bool(section, key, name):
+    # The value must be a real true/false, not a string or number.
     value = _require_key(section, key, name)
     if not isinstance(value, bool):
         raise TypeError(f"'{name}.{key}' must be true or false, got {value!r}.")
@@ -683,19 +723,23 @@ def _require_bool(section, key, name):
 
 def _parse_strategy(raw, races):
     """Validate the ``strategy`` section (Phase 6)."""
+    # Strategy settings: which years and compounds, and the optimiser tolerances.
     section = _require_section(raw, "strategy")
     name = "strategy"
     years = _int_list(_require_key(section, "data_years", name), f"{name}.data_years", FIRST_SUPPORTED_YEAR)
+    # Strategy years must be races listed in the data section.
     known_years = {race.year for race in races}
     unknown = sorted(set(years) - known_years)
     if unknown:
         raise ValueError(f"'{name}.data_years' contains years not in data.races: {unknown}.")
     compounds = _require_string_list(_require_key(section, "compounds", name), f"{name}.compounds",
                                      VALID_PIRELLI_COMPOUNDS)
+    # A dry race must use at least two compounds.
     if compounds is None or len(compounds) < 2:
         raise ValueError(f"'{name}.compounds' needs at least two compounds (a dry race uses two).")
     xtol = _require_float(_require_key(section, "root_xtol", name), f"{name}.root_xtol", 0.0)
     ftol = _require_float(_require_key(section, "root_ftol", name), f"{name}.root_ftol", 0.0)
+    # At least one root-finder tolerance must be positive or the search could not stop.
     if xtol == 0 and ftol == 0:
         raise ValueError(f"'{name}': root_xtol and root_ftol cannot both be 0.")
     return StrategySettings(
@@ -713,6 +757,7 @@ def _parse_strategy(raw, races):
 
 def _parse_sensitivity(raw):
     """Validate the ``sensitivity`` section (Phase 7)."""
+    # Sensitivity settings: SE multiples (not 0), step sizes, and alternative models and rules.
     section = _require_section(raw, "sensitivity")
     name = "sensitivity"
     multiples = _require_key(section, "rate_se_multiples", name)
@@ -742,6 +787,7 @@ def _parse_sensitivity(raw):
 
 def _parse_performance(raw):
     """Validate the ``performance`` section (Phase 8)."""
+    # Benchmark settings: timing repeats, step counts, tolerances, KNN sizes and degrees.
     section = _require_section(raw, "performance")
     name = "performance"
     rtols = _require_key(section, "rk45_rtols", name)
@@ -750,6 +796,7 @@ def _parse_performance(raw):
     rtols = tuple(_require_float(v, f"{name}.rk45_rtols entry", strictly_positive=True) for v in rtols)
     sizes = _int_list(_require_key(section, "knn_train_sizes", name), f"{name}.knn_train_sizes", 1)
     k = _require_int(_require_key(section, "knn_k", name), f"{name}.knn_k", 1)
+    # k neighbours cannot exceed the smallest training set.
     if k > min(sizes):
         raise ValueError(f"'{name}.knn_k' ({k}) must not exceed the smallest training size.")
     return PerformanceSettings(
@@ -795,11 +842,14 @@ def config_from_dict(raw):
     >>> config.session
     'R'
     """
+    # The whole configuration must be a mapping (a parsed YAML document).
     if not isinstance(raw, dict):
         raise TypeError(f"The configuration must be a mapping, got {type(raw).__name__}.")
 
+    # Seed for every random step (rule 11).
     seed = _require_int(_require_key(raw, "random_seed", "top level"), "random_seed", 0)
 
+    # Data section: session, races, filters, compounds and the Pirelli allocation table.
     data = _require_section(raw, "data")
     session = _require_string(_require_key(data, "session", "data"), "data.session")
     if session not in SUPPORTED_SESSIONS:
@@ -817,11 +867,13 @@ def config_from_dict(raw):
         _require_string(_require_key(data, "allocation_file", "data"), "data.allocation_file")
     )
 
+    # Where the downloaded data are cached (never committed).
     fastf1_section = _require_section(raw, "fastf1")
     fastf1_cache_dir = Path(
         _require_string(_require_key(fastf1_section, "cache_dir", "fastf1"), "fastf1.cache_dir")
     )
 
+    # OpenF1 client politeness settings: delay between requests and number of retries.
     openf1_section = _require_section(raw, "openf1")
     openf1_cache_dir = Path(
         _require_string(_require_key(openf1_section, "cache_dir", "openf1"), "openf1.cache_dir")
@@ -833,6 +885,7 @@ def config_from_dict(raw):
         _require_key(openf1_section, "max_retries", "openf1"), "openf1.max_retries", 1
     )
 
+    # Optional race-length override (a race needs at least 2 laps).
     race = _require_section(raw, "race")
     # A race needs at least 2 laps so that a pit stop can happen between laps.
     total_laps = _optional(
@@ -840,17 +893,20 @@ def config_from_dict(raw):
         "race.total_laps_override", 2,
     )
 
+    # Fuel coefficient and its sensitivity range.
     fuel = _require_section(raw, "fuel")
     # Carrying fuel can only make the car slower, so the coefficient is >= 0.
     k_fuel = _optional(_require_key(fuel, "k_fuel", "fuel"), _require_float, "fuel.k_fuel", 0.0)
     k_fuel_range = _parse_k_fuel_range(fuel, k_fuel)
 
+    # Optional pit-loss override (otherwise estimated from the data).
     pit = _require_section(raw, "pit")
     pit_loss = _optional(
         _require_key(pit, "pit_loss_override", "pit"), _require_float,
         "pit.pit_loss_override", strictly_positive=True,
     )
 
+    # Cleaning thresholds: outlier band width and minimum stint length.
     cleaning = _require_section(raw, "cleaning")
     outlier_k = _optional(
         _require_key(cleaning, "outlier_k", "cleaning"), _require_float,
@@ -861,6 +917,7 @@ def config_from_dict(raw):
         "cleaning.min_stint_laps", 1,
     )
 
+    # Build the immutable Config object; the parse functions validate each remaining section.
     return Config(
         random_seed=seed,
         session=session,
@@ -921,6 +978,7 @@ def load_config(path="config.yaml"):
     >>> [race.year for race in config.test_races]
     [2025]
     """
+    # The file must exist; then parse it as YAML.
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"Configuration file not found: {path.resolve()}")

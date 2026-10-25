@@ -22,10 +22,12 @@ def test_scalar_correction_exact_value():
 
 
 def test_lap_one_is_unchanged():
+    # On lap 1 the car carries the reference fuel load, so no correction applies.
     assert fuel_corrected_time(80.0, 1, 70, 0.05) == 80.0
 
 
 def test_zero_coefficient_changes_nothing():
+    # With k_fuel = 0 fuel has no effect, so times are unchanged.
     times = np.array([80.0, 81.0, 82.0])
     assert fuel_corrected_time(times, [5, 6, 7], 70, 0.0).tolist() == times.tolist()
 
@@ -41,6 +43,7 @@ def test_pure_fuel_effect_is_removed_exactly():
 
 
 def test_array_inputs_and_return_type():
+    # Arrays give an array back (k_fuel x laps completed added); a single lap gives a float.
     corrected = fuel_corrected_time([80.0, 80.0, 80.0], [1, 2, 3], [70, 70, 70], 0.1)
     assert isinstance(corrected, np.ndarray)
     np.testing.assert_allclose(corrected, [80.0, 80.1, 80.2])
@@ -63,6 +66,7 @@ def test_array_inputs_and_return_type():
     ],
 )
 def test_fuel_corrected_time_rejects_bad_input(lap_time, lap_number, total_laps, k_fuel, error):
+    # Invalid times, lap numbers, race lengths and coefficients are rejected.
     with pytest.raises(error):
         fuel_corrected_time(lap_time, lap_number, total_laps, k_fuel)
 
@@ -89,16 +93,19 @@ def test_fill_total_laps_uses_highest_lap_only_when_missing():
 
 
 def test_fill_total_laps_override_wins():
+    # A race-length override replaces the value from the data in every race.
     assert fill_total_laps(make_two_races(), 70)["TotalLaps"].tolist() == [70.0] * 4
 
 
 @pytest.mark.parametrize("override, error", [(1, ValueError), (70.0, TypeError), (True, TypeError)])
 def test_fill_total_laps_rejects_bad_override(override, error):
+    # Invalid overrides are rejected.
     with pytest.raises(error):
         fill_total_laps(make_two_races(), override)
 
 
 def test_fill_total_laps_rejects_bad_table():
+    # Only tables that contain TotalLaps are accepted.
     with pytest.raises(TypeError):
         fill_total_laps([1, 2])
     with pytest.raises(ValueError):
@@ -116,6 +123,7 @@ def test_add_fuel_corrected_times_keeps_missing_as_nan():
 
 
 def test_add_fuel_corrected_times_needs_total_laps():
+    # TotalLaps must be filled first; the error names the function to call.
     with pytest.raises(ValueError, match="fill_total_laps"):
         add_fuel_corrected_times(make_two_races(), 0.05)
 
@@ -182,6 +190,7 @@ def test_pit_loss_compares_within_the_same_race():
 
 
 def test_pit_loss_without_qualifying_stops_raises():
+    # With no green-flag pit stop the pit loss cannot be estimated.
     all_laps, clean = make_pit_scenario()
     no_stops = all_laps[~all_laps["IsPitInLap"]]
     with pytest.raises(ValueError, match="No green-flag pit stops"):
@@ -189,6 +198,7 @@ def test_pit_loss_without_qualifying_stops_raises():
 
 
 def test_pit_loss_rejects_bad_input():
+    # Invalid tables and missing columns are rejected.
     all_laps, clean = make_pit_scenario()
     with pytest.raises(TypeError):
         estimate_pit_loss("laps", clean)

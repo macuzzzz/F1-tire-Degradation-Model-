@@ -116,10 +116,12 @@ def enable_cache(cache_dir):
     >>> enable_cache("cache/fastf1")  # doctest: +SKIP
     WindowsPath('C:/.../cache/fastf1')
     """
+    # The cache folder must be given as a non-empty path.
     if not isinstance(cache_dir, (str, Path)):
         raise TypeError(f"cache_dir must be a str or Path, got {type(cache_dir).__name__}.")
     if str(cache_dir).strip() == "":
         raise ValueError("cache_dir must not be empty.")
+    # Create the folder if needed and point FastF1 at it, so each race downloads only once.
     path = Path(cache_dir).resolve()
     # FastF1 refuses to use a cache folder that does not exist yet.
     path.mkdir(parents=True, exist_ok=True)
@@ -159,10 +161,12 @@ def timedelta_to_seconds(values):
     >>> timedelta_to_seconds(s).tolist()
     [92.5, nan]
     """
+    # Only a pandas timedelta Series can be converted to seconds.
     if not isinstance(values, pd.Series):
         raise TypeError(f"Expected a pandas Series, got {type(values).__name__}.")
     if not pd.api.types.is_timedelta64_dtype(values):
         raise TypeError(f"Expected a timedelta64 Series, got dtype {values.dtype}.")
+    # Convert durations such as 0:01:20.5 to float seconds (missing values stay NaN).
     return values.dt.total_seconds().astype(float)
 
 
@@ -189,13 +193,16 @@ def is_green_track_status(track_status):
     >>> is_green_track_status("1"), is_green_track_status("12"), is_green_track_status(None)
     (True, False, False)
     """
+    # A missing or empty status cannot be shown to be green.
     if not isinstance(track_status, str) or track_status == "":
         return False
+    # Green only if every status code seen during the lap is "1" (track clear).
     return set(track_status) == {GREEN_TRACK_STATUS}
 
 
 def _get_fastf1_session(year, event, session):
     """Ask FastF1 for the session object (this does not download lap data yet)."""
+    # Ask FastF1 for the session; translate its errors into this project's two error types.
     try:
         return fastf1.get_session(year, event, session)
     except ValueError as error:
@@ -213,6 +220,7 @@ def _get_fastf1_session(year, event, session):
 
 def _download_fastf1_laps(fastf1_session, description):
     """Run ``Session.load`` and return FastF1's laps table as a plain DataFrame."""
+    # Download laps and race-control messages only (no telemetry or weather, to save time).
     try:
         # Only lap timing is needed (D8). Telemetry is large and unused until
         # the optional Phase 10; weather is unused. Race-control messages are
@@ -223,6 +231,7 @@ def _download_fastf1_laps(fastf1_session, description):
         # into one clear exception type so callers only need to catch one.
         raise RaceDataUnavailableError(f"FastF1 failed to load {description}: {error}") from error
 
+    # Accessing laps fails if nothing was downloaded, e.g. when the archive needs a login.
     try:
         laps = fastf1_session.laps
     except fastf1.exceptions.DataNotLoadedError as error:
@@ -236,6 +245,7 @@ def _download_fastf1_laps(fastf1_session, description):
 
     # FastF1's `Laps` class is a DataFrame subclass with extra behaviour; a
     # plain DataFrame is simpler and keeps the rest of the code FastF1-free.
+    # Work on a plain DataFrame and refuse an empty result.
     laps = pd.DataFrame(laps)
     if laps.empty:
         raise RaceDataUnavailableError(f"FastF1 returned no laps for {description}.")
@@ -244,6 +254,7 @@ def _download_fastf1_laps(fastf1_session, description):
 
 def _read_total_laps(fastf1_session, description):
     """Return the scheduled race length [laps] as a float, or NaN if unknown."""
+    # FastF1's official race length; NaN if unknown (filled later, never guessed here).
     total_laps = getattr(fastf1_session, "total_laps", None)
     if total_laps is None or pd.isna(total_laps):
         logger.warning("Total lap count unavailable for %s; TotalLaps set to NaN.", description)
@@ -253,12 +264,14 @@ def _read_total_laps(fastf1_session, description):
 
 def _fastf1_to_unified(raw_laps, description):
     """Convert FastF1's laps table to the unified columns (from Driver onward)."""
+    # Every column the unified table needs must be present.
     missing = [column for column in REQUIRED_FASTF1_COLUMNS if column not in raw_laps.columns]
     if missing:
         raise RaceDataUnavailableError(
             f"FastF1 laps for {description} are missing required columns: {missing}"
         )
 
+    # Build the unified table: times in seconds and pit/green flags as booleans.
     laps = pd.DataFrame(
         {
             "Driver": raw_laps["Driver"],
@@ -276,6 +289,7 @@ def _fastf1_to_unified(raw_laps, description):
             "IsGreenLap": raw_laps["TrackStatus"].apply(is_green_track_status),
         }
     )
+    # Keep optional FastF1 columns when present (they help the cleaning rules).
     for column in OPTIONAL_COLUMNS:
         if column in raw_laps.columns:
             laps[column] = raw_laps[column]
@@ -319,11 +333,13 @@ def load_fastf1_laps(year, event, session="R"):
     >>> ver["LapTime"].head(2).tolist(), ver["Compound"].head(2).tolist()  # doctest: +SKIP
     ([100.236, 97.88], ['SOFT', 'SOFT'])
     """
+    # Validate the request before any download.
     validate_year(year)
     validate_event(event)
     validate_session(session)
     description = f"{year} {event} ({session})"
 
+    # Get the session, check FastF1 matched the requested event, then download and convert.
     fastf1_session = _get_fastf1_session(year, event, session)
     event_name = check_event_name(fastf1_session.event["EventName"], event)
     raw_laps = _download_fastf1_laps(fastf1_session, description)
@@ -369,8 +385,10 @@ def load_race_laps(year, event, session="R", source="fastf1", openf1_client=None
     >>> laps = load_race_laps(2023, "Hungarian Grand Prix", source="openf1",
     ...                       openf1_client=OpenF1Client("cache/openf1"))  # doctest: +SKIP
     """
+    # Only known data sources are accepted.
     if source not in VALID_SOURCES:
         raise ValueError(f"source must be one of {VALID_SOURCES}, got {source!r}.")
+    # FastF1 for seasons in its free mirror (2022 here); OpenF1 for 2023 onward.
     if source == "fastf1":
         return load_fastf1_laps(year, event, session)
 
@@ -382,6 +400,7 @@ def load_race_laps(year, event, session="R", source="fastf1", openf1_client=None
 
 def _parse_race_entry(entry):
     """Return (year, event, source) from a (year, event) or (year, event, source) entry."""
+    # Each race is (year, event) or (year, event, source); the source defaults to FastF1.
     if not isinstance(entry, (list, tuple)) or len(entry) not in (2, 3):
         raise TypeError(f"Each race must be (year, event) or (year, event, source), got {entry!r}.")
     year, event = entry[0], entry[1]
@@ -430,11 +449,13 @@ def load_many(races, session="R", openf1_client=None):
     ...                   (2023, "Hungarian Grand Prix", "openf1")],
     ...                  openf1_client=OpenF1Client("cache/openf1"))  # doctest: +SKIP
     """
+    # Need a non-empty list of races.
     if not isinstance(races, (list, tuple)):
         raise TypeError(f"races must be a list of race tuples, got {type(races).__name__}.")
     if len(races) == 0:
         raise ValueError("races must contain at least one race.")
 
+    # Validate every entry and refuse duplicates (a race loaded twice would be double-counted).
     parsed = []
     seen = set()
     for entry in races:
@@ -445,6 +466,7 @@ def load_many(races, session="R", openf1_client=None):
         seen.add(key)
         parsed.append((year, event, source))
 
+    # Load each race and stack them into one table.
     tables = []
     for year, event, source in parsed:
         tables.append(load_race_laps(year, event, session, source, openf1_client))
@@ -488,6 +510,7 @@ def select_laps(laps, teams=None, drivers=None, compounds=None, pirelli_compound
     -------
     >>> c3 = select_laps(laps, pirelli_compounds=["C3"])  # doctest: +SKIP
     """
+    # Validate the table and the compound labels.
     if not isinstance(laps, pd.DataFrame):
         raise TypeError(f"laps must be a pandas DataFrame, got {type(laps).__name__}.")
     if laps.empty:
@@ -497,6 +520,7 @@ def select_laps(laps, teams=None, drivers=None, compounds=None, pirelli_compound
             if compound not in VALID_COMPOUNDS:
                 raise ValueError(f"Unknown compound {compound!r}. Allowed: {VALID_COMPOUNDS}.")
 
+    # Each filter keeps only the listed values; None means "no filter".
     filters = (
         ("Team", teams),
         ("Driver", drivers),
@@ -504,6 +528,7 @@ def select_laps(laps, teams=None, drivers=None, compounds=None, pirelli_compound
         ("PirelliCompound", pirelli_compounds),
     )
     # Start with every row selected, then switch rows off filter by filter.
+    # Combine the filters: a lap is kept only if it passes every active one.
     keep = pd.Series(True, index=laps.index)
     for column, allowed in filters:
         if allowed is None:
@@ -516,6 +541,7 @@ def select_laps(laps, teams=None, drivers=None, compounds=None, pirelli_compound
             raise ValueError(f"Column {column!r} not found in laps.")
         keep = keep & laps[column].isin(allowed)
 
+    # An empty result usually means a misspelt name, so say what was asked for.
     selected = laps[keep].reset_index(drop=True)
     if selected.empty:
         raise ValueError(

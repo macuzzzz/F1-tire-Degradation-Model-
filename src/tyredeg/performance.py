@@ -81,9 +81,11 @@ def machine_info():
     >>> "python" in machine_info()
     True
     """
+    # Imported here because only this function needs them (keeps the module light).
     import scipy
     import sklearn
 
+    # Machine and library versions, saved next to every benchmark so timings can be compared.
     return {
         "platform": platform.platform(),
         "processor": platform.processor() or "unknown",
@@ -161,6 +163,7 @@ def time_function(func, repeats=DEFAULT_REPEATS, warmup=DEFAULT_WARMUP, min_time
     >>> result.repeats, result.minimum > 0, result.calls_per_repeat > 1
     (3, True, True)
     """
+    # Validate the function and the timing settings.
     if not callable(func):
         raise TypeError("func must be callable.")
     if isinstance(repeats, bool) or not isinstance(repeats, int) or repeats < 1:
@@ -170,22 +173,27 @@ def time_function(func, repeats=DEFAULT_REPEATS, warmup=DEFAULT_WARMUP, min_time
     if min_time_s is not None and not min_time_s > 0:
         raise ValueError(f"min_time_s must be > 0, got {min_time_s!r}.")
 
+    # Warm-up runs (caches, first-call costs) also measure how long one call takes.
     calls = 1
     single = None
     for _ in range(max(warmup, 1 if min_time_s is not None else 0)):
         start = time.perf_counter()
         func()
         single = time.perf_counter() - start
+    # Calibrate: repeat the call enough times that one measurement lasts at least min_time_s.
     if min_time_s is not None:
         # Enough calls that one repeat lasts at least min_time_s.
         calls = max(1, math.ceil(min_time_s / max(single, 1e-9)))
+    # Collect garbage first so a collection does not interrupt the timing.
     gc.collect()
     values = []
+    # Each repeat times `calls` calls and reports the time per call.
     for _ in range(repeats):
         start = time.perf_counter()
         for _ in range(calls):
             func()
         values.append((time.perf_counter() - start) / calls)
+    # Mean, spread and minimum over the repeats (the minimum is least affected by interruptions).
     std = statistics.stdev(values) if repeats > 1 else 0.0
     return TimingResult(statistics.mean(values), std, min(values), repeats, tuple(values), calls)
 
@@ -219,6 +227,7 @@ def peak_memory(func):
     >>> peak >= 8_000_000
     True
     """
+    # Memory allocated during the call only: start tracing after a clean-up, stop afterwards.
     if not callable(func):
         raise TypeError("func must be callable.")
     gc.collect()
@@ -236,6 +245,7 @@ def peak_memory(func):
 # ---------------------------------------------------------------------------
 def _check_f_flops(f_flops):
     """Raise unless ``f_flops`` is an integer >= 0 (bool rejected: True == 1)."""
+    # f_flops must be a whole number >= 0.
     if isinstance(f_flops, bool) or not isinstance(f_flops, (int, np.integer)) or f_flops < 0:
         raise ValueError(f"f_flops must be an integer >= 0, got {f_flops!r}.")
 
@@ -350,6 +360,7 @@ def rk4_step_flops(f_flops):
 
 def _combination_flops(weights):
     """FLOPs of h * sum_j w_j k_j for the non-zero weights: m mults, m - 1 adds, 1 mult by h."""
+    # m non-zero weights: m multiplications, m - 1 additions, and one multiplication by h.
     m = int(np.count_nonzero(weights))
     return m + (m - 1) + 1 if m else 0
 
@@ -397,9 +408,11 @@ def rk45_attempt_flops(f_flops):
     105
     """
     _check_f_flops(f_flops)
+    # Six new stages each cost f, their time point (2 FLOPs), their input combination and "y +".
     total = 0
     for stage in range(1, 7):
         total += f_flops + 2 + _combination_flops(ode_solvers.DP_A[stage, :stage]) + 1
+    # Then the 5th-order solution, the error estimate, the error norm (9) and the new step (3).
     total += _combination_flops(ode_solvers.DP_B5) + 1
     total += _combination_flops(ode_solvers.DP_E)
     total += 9 + 3
@@ -435,11 +448,14 @@ def solver_flops(method, n_steps, f_flops=WEAR_RHS_FLOPS, n_rejected=0):
     >>> solver_flops("rk4", 40)   # 40 steps x 25 FLOPs
     1000
     """
+    # Step counts cannot be negative.
     if n_steps < 0 or n_rejected < 0:
         raise ValueError("Step counts must be >= 0.")
+    # Fixed-step methods: steps x FLOPs per step.
     per_step = {"euler": euler_step_flops, "heun": heun_step_flops, "rk4": rk4_step_flops}
     if method in per_step:
         return int(n_steps * per_step[method](f_flops))
+    # RK45: every attempt costs the same (accepted or rejected), plus the first slope evaluation.
     if method == "rk45":
         return int((n_steps + n_rejected) * rk45_attempt_flops(f_flops) + f_flops)
     raise ValueError(f"Unknown method {method!r}.")
@@ -449,6 +465,7 @@ def solver_flops(method, n_steps, f_flops=WEAR_RHS_FLOPS, n_rejected=0):
 # Profiling
 # ---------------------------------------------------------------------------
 # Private (leading underscore): pdoc would otherwise publish its absolute value (C19).
+# Repository root; private, so the documentation does not publish this local path.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -484,11 +501,14 @@ def short_path(filename):
     >>> short_path("/home/someone/private/notes.py")
     'notes.py'
     """
+    # Installed libraries: keep the part after site-packages.
     text = str(filename).replace("\\", "/")
     if "/site-packages/" in text:
         return text.split("/site-packages/")[-1]
+    # Files in the repository: path relative to the repository root.
     try:
         return Path(filename).resolve().relative_to(_REPO_ROOT).as_posix()
+    # Anything else: the file name only (never an absolute local path).
     except (ValueError, OSError):
         return Path(text).name
 
@@ -524,21 +544,25 @@ def profile_function(func, top=25):
     >>> list(table.columns)[:3]
     ['function', 'ncalls', 'tottime_s']
     """
+    # Validate the function and the number of rows to keep.
     if not callable(func):
         raise TypeError("func must be callable.")
     if isinstance(top, bool) or not isinstance(top, (int, np.integer)) or top < 1:
         raise ValueError(f"top must be an integer >= 1, got {top!r}.")
+    # Run the function once under cProfile.
     profiler = cProfile.Profile()
     profiler.enable()
     try:
         result = func()
     finally:
         profiler.disable()
+    # One row per function: calls, own time and time including everything it calls.
     stats = pstats.Stats(profiler, stream=io.StringIO())
     rows = []
     for (filename, line, name), (_, ncalls, tottime, cumtime, _) in stats.stats.items():
         short = short_path(filename)
         rows.append({"function": f"{short}:{line}({name})", "ncalls": ncalls, "tottime_s": tottime,
                      "cumtime_s": cumtime, "percall_cum_s": cumtime / ncalls if ncalls else 0.0})
+    # Keep the functions with the largest cumulative time.
     table = pd.DataFrame(rows).sort_values("cumtime_s", ascending=False).head(top)
     return result, table.reset_index(drop=True)

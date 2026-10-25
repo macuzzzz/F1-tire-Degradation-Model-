@@ -29,11 +29,13 @@ from tyredeg.openf1_loading import (
 # ---------------------------------------------------------------------------
 class FakeResponse:
     def __init__(self, status_code, data=None, text=""):
+        # A fake HTTP response: a status code and a JSON body.
         self.status_code = status_code
         self._data = data
         self.text = text
 
     def json(self):
+        # Return the canned JSON body.
         return self._data
 
 
@@ -51,6 +53,7 @@ def fake_requests(monkeypatch, responses):
     queue = list(responses)
 
     def fake_get(url, params=None, timeout=None):
+        # Log the request and return the next canned response.
         calls.append((url, params))
         return queue.pop(0)
 
@@ -100,16 +103,19 @@ class FakeClient(OpenF1Client):
     """OpenF1Client that serves canned records instead of downloading."""
 
     def __init__(self, data):
+        # No real cache folder is needed because get() is replaced below.
         super().__init__("unused-cache-dir")
         self.data = data
         self.requests = []
 
     def get(self, endpoint, **params):
+        # Log the request and return the canned records for that endpoint.
         self.requests.append((endpoint, params))
         return self.data[endpoint]
 
 
 def scenario_client():
+    # A fake OpenF1 client that serves the small hand-made race below (no network).
     return FakeClient({"sessions": SESSIONS, "drivers": DRIVERS, "laps": LAPS,
                        "stints": STINTS, "pit": PITS, "race_control": RACE_CONTROL})
 
@@ -118,11 +124,13 @@ class FakeEvent(dict):
     """Stand-in for fastf1.events.Event (a dict with get_session_date)."""
 
     def get_session_date(self, identifier, utc=False):
+        # Every session of this fake event starts at the same known time.
         return pd.Timestamp("2023-07-23 13:00:00")
 
 
 @pytest.fixture
 def fake_schedule(monkeypatch):
+    # Replace FastF1's event lookup so the race date is known offline.
     def fake_get_event(year, event):
         return FakeEvent(EventName="Hungarian Grand Prix")
 
@@ -146,11 +154,13 @@ def test_client_downloads_once_then_uses_cache(tmp_path, monkeypatch, no_sleep):
 
 
 def test_cache_path_is_independent_of_parameter_order(tmp_path):
+    # The same query in a different parameter order must hit the same cache file.
     client = OpenF1Client(tmp_path)
     assert client.cache_path("laps", {"b": 2, "a": 1}) == client.cache_path("laps", {"a": 1, "b": 2})
 
 
 def test_404_means_no_data(tmp_path, monkeypatch, no_sleep):
+    # HTTP 404 from OpenF1 means "no data for this query", not an error.
     fake_requests(monkeypatch, [FakeResponse(404)])
     assert OpenF1Client(tmp_path).get("drivers", session_key=1) == []
 
@@ -164,6 +174,7 @@ def test_429_is_retried_with_backoff(tmp_path, monkeypatch, no_sleep):
 
 
 def test_429_gives_up_after_max_retries(tmp_path, monkeypatch, no_sleep):
+    # Repeated rate-limiting (HTTP 429) eventually gives up with a clear error.
     fake_requests(monkeypatch, [FakeResponse(429)] * 2)
     client = OpenF1Client(tmp_path, max_retries=2)
     with pytest.raises(RaceDataUnavailableError, match="rate-limiting"):
@@ -179,12 +190,14 @@ def test_401_live_session_is_reported_clearly(tmp_path, monkeypatch, no_sleep):
 
 
 def test_other_http_error(tmp_path, monkeypatch, no_sleep):
+    # Any other HTTP error is reported with its status code.
     fake_requests(monkeypatch, [FakeResponse(500)])
     with pytest.raises(RaceDataUnavailableError, match="500"):
         OpenF1Client(tmp_path).get("laps", session_key=1)
 
 
 def test_network_failure(tmp_path, monkeypatch, no_sleep):
+    # A network failure is reported as RaceDataUnavailableError.
     def broken_get(url, params=None, timeout=None):
         raise openf1_loading.requests.ConnectionError("offline")
 
@@ -199,11 +212,13 @@ def test_network_failure(tmp_path, monkeypatch, no_sleep):
      ({"max_retries": 0}, ValueError), ({"max_retries": 1.5}, TypeError)],
 )
 def test_client_rejects_bad_settings(tmp_path, kwargs, error):
+    # Invalid client settings are rejected.
     with pytest.raises(error):
         OpenF1Client(tmp_path, **kwargs)
 
 
 def test_client_rejects_bad_cache_dir():
+    # An empty cache path is rejected.
     with pytest.raises(TypeError):
         OpenF1Client("")
 
@@ -217,12 +232,14 @@ def test_find_race_session_matches_date():
 
 
 def test_find_race_session_skips_cancelled_and_reports_missing():
+    # Cancelled sessions are skipped, and finding none is reported.
     client = FakeClient({"sessions": [dict(SESSIONS[1], is_cancelled=True)]})
     with pytest.raises(RaceDataUnavailableError, match="found 0"):
         find_race_session(client, 2023, pd.Timestamp("2023-07-23 13:00"))
 
 
 def test_race_date_utc_refuses_fuzzy_match(monkeypatch):
+    # A wrong event name must not silently match another race.
     monkeypatch.setattr(openf1_loading.fastf1, "get_event",
                         lambda year, event: FakeEvent(EventName="Australian Grand Prix"))
     with pytest.raises(RaceNotFoundError, match="Australian"):
@@ -230,6 +247,7 @@ def test_race_date_utc_refuses_fuzzy_match(monkeypatch):
 
 
 def test_race_date_utc_returns_name_and_date(fake_schedule):
+    # The event name is matched in any case, and the start time is returned in UTC.
     name, start = race_date_utc(2023, "hungarian grand prix")
     assert name == "Hungarian Grand Prix"
     assert start == pd.Timestamp("2023-07-23 13:00:00")
@@ -244,6 +262,7 @@ def scenario_rows():
 
 
 def test_lap_times_and_missing_values():
+    # A lap without a duration becomes NaN; others are converted to seconds.
     rows = scenario_rows()
     assert math.isnan(rows.loc[("VER", 1), "LapTime"])
     assert rows.loc[("VER", 2), "LapTime"] == 80.0
@@ -261,6 +280,7 @@ def test_tyre_life_counts_laps_completed_by_end_of_lap():
 
 
 def test_pit_flags():
+    # The pit entry and pit exit laps are flagged from the pit-stop records.
     rows = scenario_rows()
     assert rows["IsPitInLap"].sum() == 1 and rows.loc[("VER", 3), "IsPitInLap"]
     assert rows["IsPitOutLap"].sum() == 1 and rows.loc[("VER", 4), "IsPitOutLap"]
@@ -276,6 +296,7 @@ def test_green_flags_from_race_control():
 
 
 def test_lap_without_stint_data():
+    # A lap with no stint record keeps its team but has no compound or tyre age.
     rows = scenario_rows()
     assert rows.loc[("LEC", 2), "Team"] == "Ferrari"
     assert rows.loc[("LEC", 2), "Compound"] is None
@@ -283,6 +304,7 @@ def test_lap_without_stint_data():
 
 
 def test_build_laps_rows_needs_laps():
+    # A race without laps is reported clearly.
     with pytest.raises(RaceDataUnavailableError):
         build_laps_rows([], DRIVERS, STINTS, PITS, RACE_CONTROL)
 
@@ -303,10 +325,12 @@ def test_load_openf1_laps_returns_unified_table(fake_schedule):
 
 
 def test_load_openf1_laps_rejects_years_before_2023():
+    # OpenF1 has no data before 2023.
     with pytest.raises(ValueError, match="2023"):
         load_openf1_laps(2022, "Hungarian Grand Prix", scenario_client())
 
 
 def test_load_openf1_laps_needs_a_client():
+    # Only an OpenF1 client can be used.
     with pytest.raises(TypeError):
         load_openf1_laps(2023, "Hungarian Grand Prix", client="not a client")

@@ -51,6 +51,7 @@ PREDICTED = [1.0, 3.0, 2.0, 6.0]
 
 
 def test_metrics_hand_computed():
+    # Metrics on a small example computed by hand.
     assert rmse(ACTUAL, PREDICTED) == pytest.approx(np.sqrt(1.5))
     assert mae(ACTUAL, PREDICTED) == pytest.approx(1.0)
     assert max_abs_error(ACTUAL, PREDICTED) == pytest.approx(2.0)
@@ -78,6 +79,7 @@ def test_perfect_prediction_and_constant_actual():
 
 @pytest.mark.parametrize("actual, predicted", [([], []), ([1.0, 2.0], [1.0]), ([1.0, np.nan], [1.0, 2.0])])
 def test_metric_input_validation(actual, predicted):
+    # Invalid metric inputs are rejected.
     with pytest.raises(ValueError):
         rmse(actual, predicted)
 
@@ -107,6 +109,7 @@ def test_test_race_never_in_training_fold_when_not_passed():
 
 
 def test_holdout_split():
+    # The named race becomes the test race, all others are training races.
     fold = holdout_split(RACES + ["2025_hungarian_grand_prix"], ["2025_hungarian_grand_prix"])
     assert fold.test_races == ("2025_hungarian_grand_prix",)
     assert fold.train_races == tuple(RACES)
@@ -115,6 +118,7 @@ def test_holdout_split():
 
 
 def test_fold_rejects_overlap_and_empty_sides():
+    # A race cannot be on both sides, and neither side can be empty.
     with pytest.raises(ValueError, match="both"):
         Fold(("r1", "r2"), ("r2",))
     with pytest.raises(ValueError):
@@ -124,6 +128,7 @@ def test_fold_rejects_overlap_and_empty_sides():
 
 
 def test_fold_masks_split_laps_by_race():
+    # Fold masks split laps by race, with no lap on both sides.
     laps = pd.DataFrame({"RaceId": ["r1", "r1", "r2", "r3"]})
     train, test = fold_masks(laps, Fold(("r1", "r3"), ("r2",)))
     assert train.tolist() == [True, True, False, True]
@@ -154,9 +159,11 @@ def synthetic_laps(rate=0.07, n_races=3, stints_per_race=12, noise=0.3, seed=SEE
 
 class LinearDegradation:
     def __init__(self, rate):
+        # Degradation rate in seconds per lap of tyre age.
         self.rate = rate
 
     def degradation(self, tyre_age):
+        # Degradation grows linearly with tyre age.
         return self.rate * np.asarray(tyre_age, dtype=float)
 
 
@@ -178,6 +185,7 @@ def test_anchor_uses_only_the_first_laps():
 
 
 def test_predict_held_out_rejects_bad_anchor_and_short_stints():
+    # Invalid anchor counts and stints too short to score are rejected.
     laps = synthetic_laps(n_races=1, stints_per_race=2)
     with pytest.raises(ValueError):
         predict_held_out(LinearDegradation(0.07), laps, anchor_laps=0)
@@ -187,6 +195,7 @@ def test_predict_held_out_rejects_bad_anchor_and_short_stints():
 
 @pytest.fixture(scope="module")
 def models_settings():
+    # The model settings from the real config.yaml.
     return load_config("config.yaml").models
 
 
@@ -213,6 +222,7 @@ def test_cross_validation_skips_k_larger_than_training_set(models_settings):
 
 
 def test_cross_validation_never_trains_on_the_held_out_race(models_settings):
+    # A recording model checks that no fold is ever trained on its own test race.
     laps = synthetic_laps()
     seen = []
 
@@ -221,6 +231,7 @@ def test_cross_validation_never_trains_on_the_held_out_race(models_settings):
 
         @staticmethod
         def fit(ages, times, ids):
+            # Record which races each fit sees, then return a fixed model.
             seen.append({label.split("|")[0] for label in ids})
             return LinearDegradation(0.07)
 
@@ -252,12 +263,14 @@ def test_one_standard_error_rule_prefers_simpler_model():
 
 
 def test_selection_picks_best_when_others_are_too_far():
+    # If no simpler model is within one SE of the best, the best model is chosen.
     summary = pd.DataFrame({"model": ["p1", "k"], "family": ["polynomial", "knn"],
                             "rmse_mean": [0.80, 0.60], "rmse_se": [0.01, 0.01]})
     assert select_models(summary, {"p1": 1, "k": 10})["selected"] == "k"
 
 
 def test_selection_needs_a_candidate():
+    # At least one candidate besides the baseline is needed.
     with pytest.raises(ValueError):
         select_models(pd.DataFrame({"model": [BASELINE_NAME], "family": ["baseline"],
                                     "rmse_mean": [1.0], "rmse_se": [0.1]}), {BASELINE_NAME: 0})
@@ -284,6 +297,7 @@ def test_rank_compounds_reports_without_forcing_an_order():
 
 
 def test_binned_residuals():
+    # Residual counts, means and standard errors per tyre-age bin.
     table = binned_residuals([1, 2, 11, 12, 25], [0.1, -0.1, 0.5, 0.7, 9.0], [0, 10, 20])
     assert table["n"].tolist() == [2, 2]
     assert table["mean"].round(6).tolist() == [0.0, 0.6]
@@ -308,12 +322,14 @@ def fuel_laps(leftover):
 
 
 def test_leftover_fuel_effect_is_recovered():
+    # A leftover fuel effect of 0.02 s/lap is recovered and flagged.
     result = leftover_fuel_effect(fuel_laps(0.02), ["C3"], 100, 0.95, SEED)
     assert result.estimate == pytest.approx(0.02, abs=0.003)
     assert result.flagged and result.lower > 0
 
 
 def test_no_leftover_fuel_effect_is_not_flagged():
+    # Without a leftover fuel effect nothing is flagged.
     result = leftover_fuel_effect(fuel_laps(0.0), ["C3"], 100, 0.95, SEED)
     assert abs(result.estimate) < 0.003
     assert not result.flagged and result.lower < 0 < result.upper
@@ -328,6 +344,7 @@ def test_test_stage_refuses_without_selection(tmp_path):
 
 
 def test_selection_round_trip(tmp_path):
+    # The saved selection reads back with the same content.
     path = tmp_path / "sub" / "model_selection.json"
     write_selection(path, {"C3": {"selected": "polynomial degree 1"}}, {"git_commit": "abc"})
     loaded = load_selection(path)

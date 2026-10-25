@@ -16,6 +16,7 @@ from tyredeg.strategy import CompoundModel, LinearDegradation, optimise_brute_fo
 
 
 def models():
+    # Two compounds with straight-line degradation, used as a small strategy problem.
     return {"C3": CompoundModel("C3", LinearDegradation(0.06), 85.0, 40),
             "C4": CompoundModel("C4", LinearDegradation(0.055), 84.9, 35)}
 
@@ -28,6 +29,7 @@ def test_stint_table_is_the_sum_of_lap_times_and_marks_long_stints_infeasible():
 
 @pytest.mark.parametrize("stops", [1, 2])
 def test_exhaustive_search_agrees_with_the_optimisers(stops):
+    # The audit's independent exhaustive search must find the same optimum as the optimisers.
     fuel_total = 0.046 * 70 * 69 / 2
     table = audit.stint_time_table(models(), 70)
     time, sequence, lengths = audit.best_by_enumeration(table, ["C3", "C4"], 70, stops, 20.9, fuel_total)

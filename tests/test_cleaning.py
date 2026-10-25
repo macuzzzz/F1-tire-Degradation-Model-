@@ -132,6 +132,7 @@ def test_clean_laps_keeps_the_right_laps():
 
 
 def test_clean_laps_does_not_modify_input():
+    # Cleaning must return new tables and leave the caller's table untouched.
     laps = make_race()
     before = laps.copy()
     clean_laps(laps, SETTINGS)
@@ -139,6 +140,7 @@ def test_clean_laps_does_not_modify_input():
 
 
 def test_clean_laps_without_isaccurate_column():
+    # FastF1-only columns are optional: without IsAccurate the rule removes nothing.
     laps = make_race().drop(columns=["IsAccurate"])
     _, report = clean_laps(laps, SETTINGS)
     removed = dict(zip(report["rule"], report["removed"]))
@@ -146,6 +148,7 @@ def test_clean_laps_without_isaccurate_column():
 
 
 def test_clean_laps_with_project_config():
+    # The real config.yaml thresholds work, and the report's last row equals the clean laps kept.
     from tyredeg.config import load_config
 
     config = load_config("config.yaml")
@@ -178,6 +181,7 @@ def test_clean_laps_rejects_bad_tables():
     ],
 )
 def test_clean_laps_rejects_bad_settings(settings, error):
+    # Invalid thresholds in the settings are rejected with the expected error type.
     with pytest.raises(error):
         clean_laps(make_race(), settings)
 
@@ -195,16 +199,19 @@ def test_simple_rule_masks():
 
 
 def test_inaccurate_mask_treats_unknown_as_accurate():
+    # Only an explicit False flag removes a lap; unknown (NaN/None) is not evidence of a bad lap.
     laps = pd.DataFrame({"IsAccurate": [True, False, np.nan, None]})
     assert inaccurate_mask(laps).tolist() == [False, True, False, False]
 
 
 def test_inaccurate_mask_without_column():
+    # Without the IsAccurate column no lap is flagged.
     assert inaccurate_mask(pd.DataFrame({"LapTime": [80.0, 81.0]})).tolist() == [False, False]
 
 
 @pytest.mark.parametrize("column", ["Stint", "Compound", "TyreLife"])
 def test_missing_stint_info_each_column(column):
+    # A missing value in any one of Stint, Compound or TyreLife flags that lap.
     laps = make_stint("A", 1, 2, 3)
     laps[column] = laps[column].astype(object)
     laps.loc[1, column] = None
@@ -238,6 +245,7 @@ def test_theil_sen_recovers_exact_line():
 
 
 def test_theil_sen_ignores_a_large_outlier():
+    # The Theil-Sen line is robust: one 10-second outlier does not change slope or intercept.
     x = np.arange(1, 11, dtype=float)
     y = 80.0 + 0.07 * x
     y[4] += 10.0
@@ -259,6 +267,7 @@ def test_theil_sen_matches_scipy_benchmark():
 
 
 def test_theil_sen_all_x_equal_gives_zero_slope():
+    # With all x equal no slope can be computed: slope 0, intercept = median of y.
     intercept, slope = theil_sen_line([5, 5, 5], [80.0, 81.0, 82.0])
     assert slope == 0.0
     assert intercept == 81.0
@@ -270,6 +279,7 @@ def test_theil_sen_all_x_equal_gives_zero_slope():
      ([[1, 2], [3, 4]], [[1, 2], [3, 4]])],
 )
 def test_theil_sen_rejects_bad_input(x, y):
+    # Invalid inputs (wrong shape, too few points, NaN) are rejected.
     with pytest.raises(ValueError):
         theil_sen_line(x, y)
 
@@ -305,5 +315,6 @@ def test_robust_flags_short_or_constant_stints():
 @pytest.mark.parametrize("k, error", [(0, ValueError), (-1.0, ValueError), (np.inf, ValueError),
                                       ("3", TypeError), (True, TypeError)])
 def test_robust_flags_reject_bad_k(k, error):
+    # The outlier rule rejects invalid thresholds.
     with pytest.raises(error):
         robust_outlier_flags([1, 2, 3], [80.0, 80.1, 80.2], k)

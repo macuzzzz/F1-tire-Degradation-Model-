@@ -33,6 +33,7 @@ def synthetic_stints(n=400):
 
 @pytest.mark.parametrize("method", FITTERS)
 def test_recovers_known_coefficients_from_noisy_data(method):
+    # Each method recovers the true coefficients to within a few standard errors.
     X, y = synthetic_stints()
     result = FITTERS[method](X, y)
     assert isinstance(result, LeastSquaresResult)
@@ -43,6 +44,7 @@ def test_recovers_known_coefficients_from_noisy_data(method):
 
 @pytest.mark.parametrize("method", FITTERS)
 def test_matches_numpy_lstsq(method):
+    # Each method gives the same coefficients as numpy.linalg.lstsq (the benchmark).
     X, y = synthetic_stints()
     reference, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
     np.testing.assert_allclose(FITTERS[method](X, y).coefficients, reference,
@@ -51,6 +53,7 @@ def test_matches_numpy_lstsq(method):
 
 @pytest.mark.parametrize("method", FITTERS)
 def test_standard_errors_and_rss_match_textbook_formulas(method):
+    # Residual sum of squares and standard errors follow the textbook formulas.
     X, y = synthetic_stints()
     result = FITTERS[method](X, y)
     beta, residuals, _, _ = np.linalg.lstsq(X, y, rcond=None)
@@ -61,6 +64,7 @@ def test_standard_errors_and_rss_match_textbook_formulas(method):
 
 
 def test_exact_fit_has_no_standard_errors():
+    # With as many points as parameters the fit is exact and no error can be estimated.
     result = fit_linear_least_squares([[1.0, 0.0], [1.0, 1.0]], [1.0, 3.0])
     np.testing.assert_allclose(result.coefficients, [1.0, 2.0])
     assert np.all(np.isnan(result.standard_errors))
@@ -84,6 +88,7 @@ def test_polynomial_recovers_quadratic(method, scale):
 
 
 def test_scaling_maps_inputs_to_unit_interval():
+    # Scaling maps the tyre ages onto [-1, 1]; unscaled leaves them as they are.
     fit = fit_polynomial([1.0, 21.0, 41.0], [1.0, 2.0, 3.0], 1)
     assert (fit.centre, fit.half_range) == (21.0, 20.0)
     unscaled = fit_polynomial([1.0, 21.0, 41.0], [1.0, 2.0, 3.0], 1, scale=False)
@@ -91,6 +96,7 @@ def test_scaling_maps_inputs_to_unit_interval():
 
 
 def test_scaling_reduces_condition_number():
+    # Scaling the ages makes the design matrix far better conditioned.
     age = np.arange(1.0, 42.0)
     y = 80.0 + 0.05 * age
     unscaled = fit_polynomial(age, y, 3, scale=False).result.condition_estimate
@@ -126,6 +132,7 @@ def test_qr_more_accurate_than_normal_on_ill_conditioned_fit():
 
 
 def test_design_matrix_columns():
+    # The design matrix holds 1, s, s^2 for each scaled age s.
     X = polynomial_design_matrix([0.0, 2.0], 2, centre=1.0, half_range=1.0)
     np.testing.assert_allclose(X, [[1.0, -1.0, 1.0], [1.0, 1.0, 1.0]])
 
@@ -144,11 +151,13 @@ def test_design_matrix_columns():
 )
 @pytest.mark.parametrize("method", FITTERS)
 def test_invalid_least_squares_inputs(method, X, y):
+    # Invalid matrices and data are rejected by every method.
     with pytest.raises(ValueError):
         FITTERS[method](X, y)
 
 
 def test_dependent_columns_are_singular():
+    # Linearly dependent columns make the problem singular.
     X = np.column_stack([np.ones(5), np.arange(5.0), 2 * np.arange(5.0)])
     with pytest.raises(SingularMatrixError):
         fit_linear_least_squares(X, np.arange(5.0))
@@ -165,5 +174,6 @@ def test_dependent_columns_are_singular():
     ],
 )
 def test_invalid_polynomial_inputs(kwargs, error):
+    # Invalid polynomial settings are rejected with the expected error type.
     with pytest.raises(error):
         fit_polynomial([1.0, 2.0, 3.0], [1.0, 2.0, 3.0], **kwargs)

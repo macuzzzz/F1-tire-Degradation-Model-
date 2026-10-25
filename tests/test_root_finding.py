@@ -25,10 +25,12 @@ GOLDEN_RATIO = (1.0 + np.sqrt(5.0)) / 2.0
 
 
 def square_minus_two(x):
+    # Test function with the known root sqrt(2).
     return x * x - 2.0
 
 
 def square_minus_two_prime(x):
+    # Its exact derivative, for Newton's method.
     return 2.0 * x
 
 
@@ -61,6 +63,7 @@ def test_all_methods_find_known_roots(f, fprime, bracket, root):
 
 
 def test_newton_matches_scipy_newton():
+    # My Newton must give the same root as SciPy's Newton (the benchmark).
     mine = newton(square_minus_two, square_minus_two_prime, 1.0).root
     theirs = optimize.newton(square_minus_two, 1.0, fprime=square_minus_two_prime)
     assert mine == pytest.approx(theirs, abs=1e-14)
@@ -76,6 +79,7 @@ def test_newton_converges_quadratically():
 
 
 def test_secant_converges_with_golden_ratio_order():
+    # The secant method converges with order close to the golden ratio (1.618).
     history = secant(square_minus_two, 1.0, 2.0).history
     orders = convergence_orders(history, ROOT_2)
     assert abs(orders[-1] - GOLDEN_RATIO) <= VERIFY.secant_order_tolerance
@@ -96,6 +100,8 @@ def test_bisection_iteration_count_matches_theory():
 
 
 def test_newton_needs_fewer_iterations_than_secant_and_bisection():
+    # Newton (order 2) needs fewer iterations than secant (1.618), and secant fewer than bisection
+    # (1).
     newton_iterations = newton(square_minus_two, square_minus_two_prime, 1.5).iterations
     secant_iterations = secant(square_minus_two, 1.0, 2.0).iterations
     bisection_iterations = bisection(square_minus_two, 1.0, 2.0).iterations
@@ -112,6 +118,7 @@ def steep(x):
 
 
 def steep_prime(x):
+    # Exact derivative of the steep test function.
     return 1e3 * np.exp(x / 10.0)
 
 
@@ -119,6 +126,7 @@ STEEP_ROOT = 10.0 * np.log(30.0)
 
 
 def test_tighter_tolerance_gives_more_accurate_root():
+    # A tighter tolerance takes more iterations and gives a more accurate root.
     loose = bisection(square_minus_two, 1.0, 2.0, xtol=1e-4, ftol=0.0)
     tight = bisection(square_minus_two, 1.0, 2.0, xtol=1e-12, ftol=0.0)
     assert tight.iterations > loose.iterations
@@ -126,12 +134,14 @@ def test_tighter_tolerance_gives_more_accurate_root():
 
 
 def test_both_tests_must_pass_by_default():
+    # By default both stopping tests (step size and residual) must be met.
     result = newton(square_minus_two, square_minus_two_prime, 1.0)
     step = abs(result.history[-1] - result.history[-2])
     assert step <= 1e-10 and abs(square_minus_two(result.root)) <= 1e-12
 
 
 def test_a_zero_tolerance_switches_that_test_off():
+    # Setting one tolerance to 0 leaves only the other test active.
     by_step = newton(square_minus_two, square_minus_two_prime, 1.0, ftol=0.0)
     by_residual = newton(square_minus_two, square_minus_two_prime, 1.0, xtol=0.0)
     assert abs(by_step.root - ROOT_2) < 1e-10
@@ -173,16 +183,19 @@ def test_bisection_without_sign_change():
 
 
 def test_bisection_endpoint_root():
+    # If an end of the bracket is already a root it is returned at once.
     result = bisection(lambda x: x - 1.0, 1.0, 2.0)
     assert result.root == 1.0 and result.iterations == 0
 
 
 def test_newton_zero_derivative():
+    # A zero derivative stops Newton (the next step would divide by zero).
     with pytest.raises(ZeroDerivativeError):
         newton(square_minus_two, square_minus_two_prime, 0.0)
 
 
 def test_secant_horizontal_secant_line():
+    # A horizontal secant line stops the secant method for the same reason.
     with pytest.raises(ZeroDerivativeError):
         secant(lambda x: x * x, -1.0, 1.0)
 
@@ -195,6 +208,7 @@ def test_newton_diverges_on_arctan_from_far_away():
 
 
 def test_not_converged_within_max_iter():
+    # Hitting the iteration limit raises NotConvergedError.
     with pytest.raises(NotConvergedError):
         bisection(square_minus_two, 1.0, 2.0, max_iter=3)
     with pytest.raises(NotConvergedError):
@@ -202,6 +216,7 @@ def test_not_converged_within_max_iter():
 
 
 def test_failures_are_value_errors():
+    # All failures are ValueErrors, so callers can catch them together.
     for error in (NoSignChangeError, ZeroDerivativeError, DivergenceError, NotConvergedError):
         assert issubclass(error, ValueError)
 
@@ -222,5 +237,6 @@ def test_failures_are_value_errors():
     ],
 )
 def test_invalid_inputs(call, error):
+    # Invalid functions, brackets and tolerances are rejected.
     with pytest.raises(error):
         call()

@@ -34,11 +34,13 @@ from pathlib import Path
 
 import matplotlib
 
+# Draw figures to files only (no window).
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
+# Make the package and the other scripts importable when this script is run directly.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
@@ -58,6 +60,7 @@ from tyredeg.validation import (  # noqa: E402
     predict_held_out,
 )
 
+# Output folders for the audit tables and figures.
 REPORTS = REPO_ROOT / "reports"
 FIGURES = REPORTS / "figures"
 # Tyre-age bins for the residual analysis [laps]; the last bin holds ages beyond
@@ -66,11 +69,13 @@ AGE_BIN_EDGES = [0, 10, 20, 30, 41, 60]
 # Agreement required between independently recomputed and reported values [s].
 TOLERANCE_S = 1e-6
 
+# One logger for the audit messages.
 logger = logging.getLogger("audit")
 
 
 def check(rows, name, passed, detail):
     """Record one check; ``passed`` is True, False or None (information only)."""
+    # Record one check: passed, FAILED, or information only (passed is None).
     status = "info" if passed is None else ("passed" if passed else "FAILED")
     rows.append({"check": name, "status": status, "detail": detail})
     logger.info("[%s] %s: %s", status, name, detail)
@@ -81,8 +86,10 @@ def check(rows, name, passed, detail):
 # ---------------------------------------------------------------------------
 def anchor_mean_degradation(model, laps, anchor_laps):
     """Mean d(age) over the first ``anchor_laps`` laps of each stint (as in D49)."""
+    # The first anchor_laps laps of each stint (the laps that set its base pace).
     ordered = laps.sort_values([STINT_COLUMN, "LapNumber"], kind="stable")
     anchors = ordered.groupby(STINT_COLUMN, sort=False).head(anchor_laps)
+    # Model degradation at those laps, averaged per stint.
     values = pd.Series(model.degradation(anchors["TyreLife"].to_numpy(float)), index=anchors.index)
     return values.groupby(anchors[STINT_COLUMN]).mean()
 
@@ -93,8 +100,10 @@ def wear_rate_bias(train_model, test_model, test_laps, scored, anchor_laps):
     Each prediction is anchored on its stint's first laps, so a wrong curve
     causes an error of [d_train(age) - d_train(anchor)] - [d_test(age) - d_test(anchor)].
     """
+    # Anchor-lap average of each curve, per stint (both curves anchored the same way).
     anchor_train = anchor_mean_degradation(train_model, test_laps, anchor_laps)
     anchor_test = anchor_mean_degradation(test_model, test_laps, anchor_laps)
+    # Error per scored lap if only the curve were wrong: training shape minus 2025 shape.
     ages = scored["TyreLife"].to_numpy(float)
     stints = scored[STINT_COLUMN]
     error = (train_model.degradation(ages) - anchor_train.loc[stints].to_numpy()) \
@@ -109,30 +118,37 @@ def anchor_lap_residual(test_model, test_laps, anchor_laps):
     first laps of a stint (tyre warm-up, traffic after the stop) sit above the
     curve that describes the rest of the stint.
     """
+    # The anchor laps of each stint in the test race.
     ordered = test_laps.sort_values([STINT_COLUMN, "LapNumber"], kind="stable")
     anchors = ordered.groupby(STINT_COLUMN, sort=False).head(anchor_laps)
+    # Fitted 2025 lap time at those laps: stint offset + 2025 degradation.
     offsets = anchors[STINT_COLUMN].map(test_model.stint_offsets()).to_numpy(float)
     fitted = offsets + test_model.degradation(anchors["TyreLife"].to_numpy(float))
+    # How far the anchor laps sat above (+) or below (-) the 2025 curve.
     return float(np.mean(anchors["FuelCorrectedTime"].to_numpy(float) - fitted))
 
 
 def diagnose_test(config, rows):
+    # Load the frozen selection, the reported test results and both data sets.
     selection = load_selection(REPO_ROOT / config.validation.selection_file)["selection"]
     reported = pd.read_csv(REPO_ROOT / config.validation.test_results_file)
     train = prepare_laps(config, config.train_races).clean
     test = prepare_laps(config, config.test_races).clean
     anchor = config.validation.anchor_laps
     summary, bins, teams, curves = [], [], [], {}
+    # For each compound: refit the selected model on the training races, as in the test stage.
     for compound in config.pirelli_compounds:
         name = selection[compound]["selected"]
         spec = {s.name: s for s in candidate_models(compound, config.models)}[name]
         train_c = train[train["PirelliCompound"] == compound]
         test_c = test[test["PirelliCompound"] == compound]
+        # Predict the 2025 race exactly as the single test did.
         model = fit_on(spec, train_c)
         scored = predict_held_out(model, test_c, anchor)
         metrics = compute_metrics(scored["actual"], scored["predicted"])
 
         # The recomputed test result must equal the one reported once (D55).
+        # Check that the recomputed test result equals the one reported (same RMSE and bias).
         saved = reported[(reported["compound"] == compound) & (reported["model"] == name)].iloc[0]
         same = abs(metrics["rmse"] - saved["rmse"]) < 1e-9 and abs(metrics["bias"] - saved["bias"]) < 1e-9
         check(rows, f"A1 {compound}: test result reproduced", same,
@@ -140,13 +156,17 @@ def diagnose_test(config, rows):
               f"{saved['rmse']:.4f}, {saved['bias']:+.4f})")
 
         # Same model form fitted on the test race itself: the 2025 degradation curve.
+        # Fit the same model form to the 2025 race alone: the 2025 degradation curve.
         test_model = fit_on(spec, test_c)
+        # Bias expected from the change of curve alone; the rest comes from the anchor laps.
         expected = wear_rate_bias(model, test_model, test_c, scored, anchor)
+        # Error metrics within the training tyre-age range only (to rule out extrapolation).
         max_train_age = float(train_c["TyreLife"].max())
         inside = scored["TyreLife"] <= max_train_age
         inside_metrics = compute_metrics(scored.loc[inside, "actual"], scored.loc[inside, "predicted"])
         rate_train = float(model.params()["coefficients"][0])
         rate_test = float(test_model.params()["coefficients"][0])
+        # Save the diagnosis for this compound.
         summary.append({
             "compound": compound, "model": name, "n_scored": metrics["n"],
             "rmse": metrics["rmse"], "bias": metrics["bias"],
@@ -169,6 +189,7 @@ def diagnose_test(config, rows):
               f"{int((~inside).sum())} laps beyond the training age {max_train_age:.0f}; bias within "
               f"training ages {inside_metrics['bias']:+.3f} s/lap")
 
+        # Residuals by tyre-age bin, and by team (is one car responsible?).
         table = binned_residuals(scored["TyreLife"], scored["residual"], AGE_BIN_EDGES)
         bins.append(table.assign(compound=compound))
         stint_team = test_c.drop_duplicates(STINT_COLUMN).set_index(STINT_COLUMN)["Team"]
@@ -176,20 +197,24 @@ def diagnose_test(config, rows):
         for team, group in by_team.groupby("Team"):
             teams.append({"compound": compound, "team": team, "n": len(group),
                           "bias": float(group["residual"].mean())})
+        # Keep the fitted curves for the figure.
         curves[compound] = (model, test_model, train_c, test_c)
 
     # Fuel correction on the test race alone (D54 method; descriptive only).
+    # Fuel correction check on the test race alone.
     fuel = leftover_fuel_effect(test, list(config.pirelli_compounds), config.models.bootstrap_resamples,
                                 config.models.confidence_level, config.random_seed)
     check(rows, "A3 leftover fuel effect on the 2025 race", None,
           f"{fuel.estimate:+.4f} s/lap, 95% CI [{fuel.lower:+.4f}, {fuel.upper:+.4f}] "
           f"(0 = the fuel correction fits 2025 too)")
+    # How many team/compound groups are biased in the same direction.
     team_table = pd.DataFrame(teams)
     positive = int((team_table["bias"] > 0).sum())
     check(rows, "A4 bias by team", None,
           f"{positive} of {len(team_table)} team/compound groups have a positive bias "
           f"(a common cause, not one car)")
 
+    # Save the tables and draw the two diagnosis figures.
     pd.DataFrame(summary).to_csv(REPORTS / "audit_2025_summary.csv", index=False)
     pd.concat(bins, ignore_index=True).to_csv(REPORTS / "audit_2025_bias_by_age.csv", index=False)
     team_table.to_csv(REPORTS / "audit_2025_bias_by_team.csv", index=False)
@@ -200,6 +225,7 @@ def diagnose_test(config, rows):
 
 def binned_degradation(model, laps):
     """Mean of (lap time - stint offset) per integer tyre age: the observed degradation."""
+    # Remove each stint's offset, then average the result per tyre age (ages with >= 5 laps).
     offsets = model.stint_offsets()
     adjusted = laps["FuelCorrectedTime"].to_numpy(float) - laps[STINT_COLUMN].map(offsets).to_numpy(float)
     table = pd.DataFrame({"age": laps["TyreLife"].to_numpy(float), "d": adjusted})
@@ -208,6 +234,7 @@ def binned_degradation(model, laps):
 
 
 def plot_train_vs_test(curves):
+    # One panel per compound: observed points and fitted lines, training vs 2025.
     fig, axes = plt.subplots(1, len(curves), figsize=(5.5 * len(curves), 4), sharey=True)
     for ax, (compound, (model, test_model, train_c, test_c)) in zip(np.atleast_1d(axes), curves.items()):
         for label, fitted, laps, colour in (("training 2022-24", model, train_c, "tab:blue"),
@@ -227,6 +254,7 @@ def plot_train_vs_test(curves):
 
 
 def plot_bias_by_age(bins):
+    # Mean residual per tyre-age bin with 2-SE error bars, one line per compound.
     fig, ax = plt.subplots(figsize=(7, 4))
     for offset, (compound, group) in zip((-0.8, 0.8), bins.groupby("compound")):
         centres = (group["bin_low"] + group["bin_high"]) / 2 + offset
@@ -247,6 +275,7 @@ def plot_bias_by_age(bins):
 # B. Leakage checks
 # ---------------------------------------------------------------------------
 def git(*args):
+    # Run a git command; None if git is missing or the command fails.
     try:
         return subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, check=True).stdout
     except (OSError, subprocess.CalledProcessError):
@@ -254,20 +283,24 @@ def git(*args):
 
 
 def lap_keys(laps):
+    # Identify a lap by race, driver and lap number.
     return set(zip(laps[RACE_COLUMN], laps["Driver"], laps["LapNumber"]))
 
 
 def check_leakage(config, rows):
+    # B1: no race may be both a training and a test race.
     train_years = {race.year for race in config.train_races}
     test_years = {race.year for race in config.test_races}
     check(rows, "B1 train and test races are disjoint", not train_years & test_years,
           f"train {sorted(train_years)}, test {sorted(test_years)}")
 
+    # B2: the frozen selection lists only training races.
     saved = load_selection(REPO_ROOT / config.validation.selection_file)
     used = " ".join(saved.get("training_races", []))
     check(rows, "B2 selection was fitted without the test race",
           all(str(year) not in used for year in test_years), f"training races: {saved.get('training_races')}")
 
+    # B3: the selection's time stamp is earlier than the first logged test run.
     log_lines = (REPO_ROOT / config.validation.test_run_log).read_text(encoding="utf-8").splitlines()
     first_test = datetime.datetime.fromisoformat(log_lines[0].split()[0])
     selected = datetime.datetime.fromisoformat(saved["created_utc"])
@@ -275,6 +308,7 @@ def check_leakage(config, rows):
           f"selection {saved['created_utc']}, first test run {log_lines[0].split()[0]}, "
           f"{len(log_lines)} test run(s) logged")
 
+    # B4: in git history, the selection commit comes before the commit that added the test results.
     added = git("log", "--diff-filter=A", "--format=%H", "--", str(config.validation.test_results_file))
     if added and added.split():
         test_commit = added.split()[-1]
@@ -287,6 +321,7 @@ def check_leakage(config, rows):
 
     # Cleaning and fuel correction must treat every race on its own: a statistic
     # computed over several races would let the test race shape the training data.
+    # B5: each race prepared alone must give the same clean laps and times as all races together.
     together = prepare_laps(config, config.races).clean
     independent = True
     for race in config.races:
@@ -298,6 +333,7 @@ def check_leakage(config, rows):
     check(rows, "B5 cleaning and fuel correction are per race", independent,
           "each race prepared alone gives the same clean laps and times as all races together")
 
+    # B6: the cross-validation data and folds contain no test-race laps.
     train = prepare_laps(config, config.train_races).clean
     test_ids = set(prepare_laps(config, config.test_races).clean[RACE_COLUMN])
     folds = leave_one_race_out(train[RACE_COLUMN])
@@ -307,6 +343,7 @@ def check_leakage(config, rows):
           f"{len(folds)} folds over {sorted(set(train[RACE_COLUMN]))}")
 
     # Anchor laps set each held-out stint's base pace and must never be scored.
+    # B7: anchor laps (which set the base pace) must never be among the scored laps.
     compound = config.pirelli_compounds[0]
     spec = candidate_models(compound, config.models)[1]
     laps_c = train[train["PirelliCompound"] == compound]
@@ -318,6 +355,8 @@ def check_leakage(config, rows):
 
     # k_fuel was chosen in Phase 2 from the training data (D22). Re-estimate the
     # leftover fuel effect on the training races only (D54 method).
+    # B8: the fuel coefficient is consistent with the training data alone; B9 records a design
+    # note.
     fuel = leftover_fuel_effect(train, list(config.pirelli_compounds), config.models.bootstrap_resamples,
                                 config.models.confidence_level, config.random_seed)
     check(rows, "B8 k_fuel consistent with the training races alone", not fuel.flagged,
@@ -329,6 +368,7 @@ def check_leakage(config, rows):
 
 
 def lap_keys_scored(scored):
+    # Scored laps identified by (stint, lap number), so they can be compared as sets.
     return set(zip(scored[STINT_COLUMN], scored["LapNumber"]))
 
 
@@ -337,10 +377,12 @@ def lap_keys_scored(scored):
 # ---------------------------------------------------------------------------
 def stint_time_table(models, total_laps):
     """table[c][n] = time of an n-lap stint on new tyres of compound c [s], by explicit sums."""
+    # Time of an n-lap stint on new tyres, by an explicit sum independent of the optimiser code.
     table = {}
     for compound, cm in models.items():
         times = np.full(total_laps + 1, np.inf)
         times[0] = 0.0
+        # Stints longer than the limit stay infinite, which marks them as infeasible.
         for n in range(1, min(cm.max_stint_laps, total_laps) + 1):
             ages = np.arange(1.0, n + 1.0)
             times[n] = n * cm.base_time + float(np.sum(cm.model.degradation(ages)))
@@ -350,17 +392,21 @@ def stint_time_table(models, total_laps):
 
 def best_by_enumeration(table, compounds, total_laps, stops, pit_loss, fuel_total):
     """Fastest race with ``stops`` stops by trying every stint-length combination."""
+    # Try every compound sequence and every combination of stint lengths (vectorised grid).
     best = (np.inf, None, None)
     for sequence in product(compounds, repeat=stops + 1):
         if len(set(sequence)) < 2:
             continue  # a dry race must use two different compounds
+        # All combinations of the first stints; the last stint takes the remaining laps.
         grids = np.meshgrid(*[np.arange(1, total_laps) for _ in range(stops)], indexing="ij")
         last = total_laps - sum(grids)
         valid = last >= 1
         time = np.zeros(last.shape)
+        # Total time of each combination; invalid ones (last stint < 1 lap) are infinite.
         for compound, lengths in zip(sequence, list(grids) + [np.clip(last, 0, total_laps)]):
             time = time + table[compound][lengths]
         time = np.where(valid, time + stops * pit_loss - fuel_total, np.inf)
+        # Keep the fastest combination found so far.
         position = np.unravel_index(np.argmin(time), time.shape)
         if time[position] < best[0]:
             lengths = [int(g[position]) for g in grids] + [int(last[position])]
@@ -371,12 +417,15 @@ def best_by_enumeration(table, compounds, total_laps, stops, pit_loss, fuel_tota
 def check_strategy(config, rows):
     import optimise_strategy
 
+    # Rebuild the strategy inputs exactly as the strategy stage does.
     models, total_laps, pit_loss, _, _, _, _ = optimise_strategy.build_inputs(config)
     k_fuel = config.k_fuel
     fuel_total = k_fuel * total_laps * (total_laps - 1) / 2.0 if config.strategy.add_fuel_effect else 0.0
+    # Independent stint-time table and the reported ranking.
     table = stint_time_table(models, total_laps)
     ranking = pd.read_csv(REPORTS / "phase6_strategy_ranking.csv")
 
+    # C1: check every ranked strategy against the race rules and recompute its time.
     problems = []
     for row in ranking.itertuples():
         sequence = row.strategy.split(" -> ")
@@ -400,6 +449,7 @@ def check_strategy(config, rows):
           f"{len(ranking)} strategies: {total_laps} laps, >= 2 compounds, stint limits {limits}, "
           f"pit loss {pit_loss:.2f} s per stop, times recomputed lap by lap within {TOLERANCE_S} s")
 
+    # C2, C3: an exhaustive search must find the same best one-stop and two-stop.
     for stops in (1, 2):
         time, sequence, lengths = best_by_enumeration(table, list(models), total_laps, stops,
                                                       pit_loss, fuel_total)
@@ -407,6 +457,7 @@ def check_strategy(config, rows):
         check(rows, f"C{stops + 1} exhaustive search confirms the best {stops}-stop",
               abs(time - reported) < TOLERANCE_S,
               f"{' -> '.join(sequence)} stints {lengths}: {time:.3f} s (reported {reported:.3f} s)")
+    # C4: three stops are outside the modelled strategies; confirm they are not faster.
     time, sequence, lengths = best_by_enumeration(table, list(models), total_laps, 3, pit_loss, fuel_total)
     best = ranking["total_time"].min()
     check(rows, "C4 three stops are not faster (outside the modelled strategies)", time > best - TOLERANCE_S,
@@ -416,6 +467,7 @@ def check_strategy(config, rows):
 # ---------------------------------------------------------------------------
 def main(config=None):
     """Run all checks; raise RuntimeError if any fails (outputs are written first)."""
+    # Quiet FastF1, set up logging when run on its own, load the config unless given.
     logging.getLogger("fastf1").setLevel(logging.ERROR)
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(name)s: %(message)s")
@@ -423,6 +475,7 @@ def main(config=None):
         config = load_config(REPO_ROOT / "config.yaml")
     REPORTS.mkdir(exist_ok=True)
     FIGURES.mkdir(exist_ok=True)
+    # Run the three groups of checks, save the results and stop if any check failed.
     rows = []
     diagnose_test(config, rows)
     check_leakage(config, rows)

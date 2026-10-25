@@ -100,23 +100,28 @@ def sensitivity_coefficient(func, x0, relative_step=None, absolute_step=None):
     >>> round(r.derivative, 9), round(r.elasticity, 9)   # exact: 6 and 2
     (6.0, 2.0)
     """
+    # Exactly one way of choosing the step must be given, and x0 must be a real number.
     if (relative_step is None) == (absolute_step is None):
         raise ValueError("Give exactly one of relative_step and absolute_step.")
     x0 = float(x0)
     if not np.isfinite(x0):
         raise ValueError(f"x0 must be finite, got {x0}.")
+    # Relative step: a fraction of |x0| (impossible at x0 = 0).
     if relative_step is not None:
         if not relative_step > 0:
             raise ValueError(f"relative_step must be > 0, got {relative_step}.")
         if x0 == 0:
             raise ValueError("A relative step is undefined at x0 = 0; use absolute_step.")
         step = relative_step * abs(x0)
+    # Absolute step: in the units of x.
     else:
         if not absolute_step > 0:
             raise ValueError(f"absolute_step must be > 0, got {absolute_step}.")
         step = float(absolute_step)
+    # Output at the nominal input and its derivative by my central difference.
     y0 = float(func(x0))
     derivative = float(central_difference(func, x0, step))
+    # Elasticity = % change of output per % change of input (undefined if x0 or y0 is 0).
     elasticity = derivative * x0 / y0 if x0 != 0 and y0 != 0 else float("nan")
     return SensitivityResult(x0, y0, step, derivative, elasticity)
 
@@ -154,6 +159,7 @@ def step_size_check(func, x0, relative_steps):
     >>> table["derivative"].round(9).tolist()
     [2.0, 2.0]
     """
+    # Repeat the derivative with each step size; agreement shows the estimate can be trusted.
     if len(relative_steps) == 0:
         raise ValueError("relative_steps must contain at least one step.")
     rows = []
@@ -193,10 +199,12 @@ def one_at_a_time(evaluate, variations):
     >>> one_at_a_time(f, [("x", "low", {"x": 0.5})])["y"].tolist()
     [2.0, 1.0]
     """
+    # The first row is the nominal case (no overrides), then one row per variation.
     if not callable(evaluate):
         raise TypeError("evaluate must be callable: evaluate(**overrides) -> dict.")
     rows = [{"input": "nominal", "label": "nominal", **_outputs(evaluate)}]
     for variation in variations:
+        # Each variation is (input name, label, {argument: value}).
         if not (isinstance(variation, (tuple, list)) and len(variation) == 3 and isinstance(variation[2], dict)):
             raise TypeError(f"Each variation must be (input, label, overrides dict), got {variation!r}.")
         name, label, overrides = variation
@@ -206,6 +214,7 @@ def one_at_a_time(evaluate, variations):
 
 def _outputs(evaluate, overrides=None):
     """Call ``evaluate`` and check that it returns a dict of outputs."""
+    # Run the model with the overrides and check it returned a dict of outputs.
     outputs = evaluate(**(overrides or {}))
     if not isinstance(outputs, dict):
         raise TypeError(f"evaluate must return a dict of outputs, got {type(outputs).__name__}.")
@@ -243,6 +252,7 @@ def tornado_table(oat, output):
     >>> tornado_table(oat, "y")["input"].tolist()
     ['a', 'b']
     """
+    # Validate the table: the needed columns and exactly one nominal row.
     if not isinstance(oat, pd.DataFrame):
         raise TypeError(f"oat must be a DataFrame, got {type(oat).__name__}.")
     missing = [column for column in ("input", output) if column not in oat.columns]
@@ -252,6 +262,7 @@ def tornado_table(oat, output):
     if len(nominal_rows) != 1:
         raise ValueError(f"oat must have exactly one 'nominal' row, found {len(nominal_rows)}.")
     nominal = float(nominal_rows[output].iloc[0])
+    # For each input: lowest and highest output over its variations, relative to the nominal.
     rows = []
     for name, group in oat[oat["input"] != "nominal"].groupby("input", sort=False):
         values = group[output].astype(float).dropna()
@@ -260,6 +271,7 @@ def tornado_table(oat, output):
         low, high = float(min(values.min(), nominal)), float(max(values.max(), nominal))
         rows.append({"input": name, "low": low, "high": high, "low_change": low - nominal,
                      "high_change": high - nominal, "span": high - low})
+    # Sort so the input with the largest effect comes first (the top of the tornado).
     table = pd.DataFrame(rows)
     return table.sort_values("span", ascending=False).reset_index(drop=True)
 
@@ -296,6 +308,7 @@ def plot_tornado(table, nominal, title, xlabel, path):
     ...     (pathlib.Path(folder) / "t.png").exists()
     True
     """
+    # Validate the table and the nominal value before plotting.
     if not isinstance(table, pd.DataFrame):
         raise TypeError(f"table must be a DataFrame, got {type(table).__name__}.")
     missing = [column for column in ("input", "low_change", "high_change") if column not in table.columns]
@@ -305,11 +318,13 @@ def plot_tornado(table, nominal, title, xlabel, path):
         raise ValueError("table is empty; there is nothing to plot.")
     if not np.isfinite(nominal):
         raise ValueError(f"nominal must be finite, got {nominal}.")
+    # Non-interactive backend: write the figure to a file without opening a window.
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    # One horizontal bar per input: red where the output rises, blue where it falls.
     fig, ax = plt.subplots(figsize=(8, 0.45 * len(table) + 1.6))
     positions = np.arange(len(table))[::-1]
     ax.barh(positions, table["high_change"], left=nominal, color="tab:red", label="raises output")
@@ -366,6 +381,7 @@ def degradation_rate_vs_fuel(clean, compound, k_values, nominal_k):
     >>> round(slope, 6)  # doctest: +SKIP
     1.0
     """
+    # Need at least two k values for a slope, all non-negative, and laps of this compound.
     if len(k_values) < 2:
         raise ValueError("k_values needs at least 2 fuel coefficients to estimate a slope.")
     if min(k_values) < 0 or nominal_k < 0:
@@ -373,13 +389,16 @@ def degradation_rate_vs_fuel(clean, compound, k_values, nominal_k):
     laps = clean[clean["PirelliCompound"] == compound]
     if laps.empty:
         raise ValueError(f"No laps of compound {compound}.")
+    # For each k: re-correct the lap times exactly (undo the nominal k, apply the new one).
     rows = []
     for k_fuel in k_values:
         # Undo the nominal correction and apply the new one (exact, no refetch).
         time = laps["FuelCorrectedTime"].to_numpy(float) + (k_fuel - nominal_k) * (laps["LapNumber"].to_numpy(float) - 1)
+        # Refit the linear model and record its wear rate.
         model = PolynomialDegradationModel(compound, degree=1).fit(laps["TyreLife"], time, laps["StintId"])
         rows.append({"k_fuel": float(k_fuel), "rate": float(model.params()["coefficients"][0])})
     rates = pd.DataFrame(rows)
+    # Straight line through (k, rate) with my least squares; its slope is d(rate)/dk.
     design = np.column_stack([np.ones(len(rates)), rates["k_fuel"].to_numpy()])
     slope = float(fit_linear_least_squares(design, rates["rate"].to_numpy()).coefficients[1])
     return rates, slope

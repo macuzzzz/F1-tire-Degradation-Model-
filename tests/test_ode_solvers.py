@@ -27,10 +27,12 @@ A, B = 0.05, 0.03
 
 
 def wear(t, d):
+    # Tyre-wear ODE dd/dn = a + b*d, the model used in the project.
     return A + B * d
 
 
 def wear_exact(n):
+    # Its closed-form solution with d(0) = 0, used as the exact reference.
     return A / B * (np.exp(B * n) - 1.0)
 
 
@@ -60,6 +62,7 @@ def observed_order(solver, f, y0, t_end, exact):
 @pytest.mark.parametrize("problem", PROBLEMS)
 @pytest.mark.parametrize("method", FIXED_STEP)
 def test_observed_order_matches_theory(method, problem):
+    # On every test problem the observed order must match the theory (1, 2 or 4).
     solver, theoretical = FIXED_STEP[method]
     f, y0, t_end, exact = PROBLEMS[problem]
     order = observed_order(solver, f, y0, t_end, exact)
@@ -68,6 +71,7 @@ def test_observed_order_matches_theory(method, problem):
 
 @pytest.mark.parametrize("method", FIXED_STEP)
 def test_observed_order_for_a_vector_problem(method):
+    # The same order check on a 2-component system (harmonic oscillator).
     solver, theoretical = FIXED_STEP[method]
     t_end = 2.0
     steps = t_end / np.array([40, 80, 160, 320])
@@ -94,6 +98,7 @@ def test_observed_order_for_a_vector_problem(method):
     ],
 )
 def test_error_at_study_optimal_step(method, n_steps, max_error):
+    # At the step count chosen in the numerics study each method meets its error target.
     solver, _ = FIXED_STEP[method]
     _, d, _ = solver(wear, (0.0, 40.0), 0.0, 40.0 / n_steps)
     assert abs(d[-1] - wear_exact(40.0)) < max_error
@@ -111,6 +116,7 @@ def test_rk4_meets_1ms_with_one_lap_steps():
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("method, per_step", [("euler", 1), ("heun", 2), ("rk4", 4)])
 def test_function_evaluation_counts(method, per_step):
+    # Cost check: f-evaluations = steps x stages per step (1, 2 or 4).
     solver, _ = FIXED_STEP[method]
     _, _, nfev = solver(decay, (0.0, 1.0), 1.0, 0.1)
     assert nfev == 10 * per_step
@@ -132,6 +138,7 @@ def test_rounding_in_step_count_does_not_create_tiny_step():
 
 
 def test_scalar_and_vector_output_shapes():
+    # A scalar problem gives a 1-D result, a vector problem one column per component.
     _, y_scalar, _ = rk4(decay, (0.0, 1.0), 1.0, 0.5)
     _, y_vector, _ = rk4(oscillator, (0.0, 1.0), [1.0, 0.0], 0.5)
     assert y_scalar.shape == (3,)
@@ -139,9 +146,11 @@ def test_scalar_and_vector_output_shapes():
 
 
 def test_scalar_problem_receives_a_float():
+    # A scalar problem passes a plain float to f, not a 1-element array.
     received = []
 
     def f(t, y):
+        # Record the type of y that the solver passes in.
         received.append(type(y))
         return -y
 
@@ -170,11 +179,13 @@ def test_scalar_problem_receives_a_float():
 )
 @pytest.mark.parametrize("solver", [euler, heun, rk4])
 def test_fixed_step_input_validation(solver, f, t_span, y0, h, error):
+    # Invalid functions, intervals, initial values and step sizes are rejected.
     with pytest.raises(error):
         solver(f, t_span, y0, h)
 
 
 def test_wrong_size_or_nonfinite_slope_is_rejected():
+    # f must return the right number of finite values.
     with pytest.raises(ValueError, match="values"):
         rk4(lambda t, y: np.array([1.0, 2.0]), (0.0, 1.0), 1.0, 0.5)
     with pytest.raises(ValueError, match="non-finite"):
@@ -210,6 +221,7 @@ def test_rk45_against_exact_and_scipy(problem, rtol, atol):
 
 
 def test_rk45_vector_problem_against_scipy():
+    # On a vector problem my RK45 is at least as accurate as SciPy's RK45 (the benchmark).
     rtol, atol = 1e-8, 1e-10
     t, y, _, _ = rk45(oscillator, (0.0, 10.0), [1.0, 0.0], rtol=rtol, atol=atol)
     reference = solve_ivp(oscillator, (0.0, 10.0), [1.0, 0.0], method="RK45", rtol=rtol, atol=atol)
@@ -220,6 +232,7 @@ def test_rk45_vector_problem_against_scipy():
 
 
 def test_rk45_error_falls_as_tolerance_tightens():
+    # A tighter tolerance must give a smaller error.
     errors = []
     for rtol in (1e-4, 1e-7, 1e-10):
         _, d, _, _ = rk45(wear, (0.0, 40.0), 0.0, rtol=rtol, atol=rtol * 1e-3)
@@ -245,6 +258,7 @@ def test_rk45_controller_settings_are_adjustable():
 
 
 def test_rk45_max_steps_exceeded():
+    # A step limit that is too small stops the solver with a clear error.
     with pytest.raises(ValueError, match="max_steps"):
         rk45(wear, (0.0, 40.0), 0.0, rtol=1e-12, atol=1e-14, max_steps=5)
 
@@ -263,5 +277,6 @@ def test_rk45_max_steps_exceeded():
     ],
 )
 def test_rk45_rejects_bad_settings(settings, error):
+    # Invalid tolerances and step-control settings are rejected.
     with pytest.raises(error):
         rk45(wear, (0.0, 40.0), 0.0, **settings)

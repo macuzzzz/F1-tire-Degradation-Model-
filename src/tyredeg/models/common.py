@@ -72,10 +72,12 @@ class StintData:
 
     @property
     def n_laps(self):
+        # Number of laps in the training data.
         return self.tyre_age.size
 
     def _per_lap(self, values):
         """Return ``values`` as a float array, after checking there is one value per lap."""
+        # Per-lap quantities must have exactly one value per lap, in the same order.
         values = np.asarray(values, dtype=float)
         if values.shape != (self.n_laps,):
             raise ValueError(f"values must have shape ({self.n_laps},), one per lap; got {values.shape}.")
@@ -83,6 +85,7 @@ class StintData:
 
     @property
     def n_stints(self):
+        # Number of different stints (each gets its own base-pace offset).
         return self.stint_labels.size
 
     def demean(self, values):
@@ -109,6 +112,7 @@ class StintData:
         >>> data.demean(data.lap_time).round(6).tolist()
         [-0.1, -0.0, 0.1, -0.1, 0.1]
         """
+        # Within transformation: subtract each lap's stint mean, which removes every stint offset.
         values = self._per_lap(values)
         return values - self.stint_means(values)[self.stint_index]
 
@@ -136,6 +140,7 @@ class StintData:
         >>> data.stint_means(data.lap_time).round(6).tolist()
         [80.1, 81.1]
         """
+        # Average a per-lap quantity within each stint: sum per stint divided by laps per stint.
         values = self._per_lap(values)
         sums = np.bincount(self.stint_index, weights=values, minlength=self.n_stints)
         counts = np.bincount(self.stint_index, minlength=self.n_stints)
@@ -166,6 +171,7 @@ def check_compound(compound):
     >>> check_compound("C3")
     'C3'
     """
+    # Compounds are identified by Pirelli codes such as "C3", never by SOFT/MEDIUM/HARD labels.
     if not isinstance(compound, str):
         raise TypeError(f"compound must be a string such as 'C3', got {compound!r}.")
     if compound not in VALID_PIRELLI_COMPOUNDS:
@@ -200,9 +206,11 @@ def check_tyre_age(tyre_age, name="tyre_age"):
     >>> check_tyre_age([0, 1.5]).tolist()
     [0.0, 1.5]
     """
+    # Accept a scalar or a 1-D array of ages and turn it into a 1-D float array.
     values = np.asarray(tyre_age, dtype=float)
     if values.ndim == 0:
         values = values.reshape(1)
+    # Reject empty, multi-dimensional, NaN or negative ages with a clear message.
     if values.ndim != 1 or values.size == 0:
         raise ValueError(f"{name} must be a non-empty 1-D array.")
     if not np.all(np.isfinite(values)):
@@ -241,6 +249,7 @@ def prepare_stint_data(tyre_age, lap_time, stint_id=None):
     >>> data.n_stints, data.stint_index.tolist()
     (2, [0, 0, 1])
     """
+    # Validate the ages and lap times (same length, finite, positive times).
     age = check_tyre_age(tyre_age)
     time = np.asarray(lap_time, dtype=float).reshape(-1)
     if time.size != age.size:
@@ -251,11 +260,14 @@ def prepare_stint_data(tyre_age, lap_time, stint_id=None):
         raise ValueError("lap_time must not contain NaN or infinite values.")
     if np.any(time <= 0):
         raise ValueError("lap_time must be > 0 seconds.")
+    # Without stint ids, all laps are treated as one stint.
     if stint_id is None:
         stint_id = np.zeros(age.size, dtype=int)
+    # One stint id per lap.
     stint_id = np.asarray(stint_id)
     if stint_id.ndim != 1 or stint_id.size != age.size:
         raise ValueError("stint_id must be 1-D with one entry per lap.")
+    # Encode the stint ids as 0..n_stints-1 (index) and keep the original labels.
     labels, index = np.unique(stint_id, return_inverse=True)
     return StintData(tyre_age=age, lap_time=time, stint_index=index, stint_labels=labels)
 
@@ -296,11 +308,13 @@ def check_degrees_of_freedom(data, n_parameters):
     ...
     ValueError: Too few laps: 5 laps, 2 stints and 3 degradation parameters leave 0 residual degrees of freedom.
     """
+    # Check the inputs, then count residual degrees of freedom: laps - offsets - parameters.
     if not isinstance(data, StintData):
         raise TypeError(f"data must be a StintData, got {type(data).__name__}.")
     if isinstance(n_parameters, bool) or not isinstance(n_parameters, (int, np.integer)) or n_parameters < 0:
         raise ValueError(f"n_parameters must be an integer >= 0, got {n_parameters!r}.")
     dof = data.n_laps - data.n_stints - n_parameters
+    # At least one is needed to estimate the noise level (and so the standard errors).
     if dof < 1:
         raise ValueError(
             f"Too few laps: {data.n_laps} laps, {data.n_stints} stints and "
@@ -333,9 +347,11 @@ def stint_labels_from_laps(laps):
     >>> stint_labels_from_laps(df).tolist()
     ['r|VER|2']
     """
+    # The stint key needs the race, the driver and the stint number.
     for column in ("RaceId", "Driver", "Stint"):
         if column not in laps.columns:
             raise ValueError(f"laps is missing column {column!r}.")
+    # Build "race|driver|stint" labels, unique across races because lap numbers restart each race.
     stint = laps["Stint"].astype(int).astype(str)
     return (laps["RaceId"].astype(str) + "|" + laps["Driver"].astype(str) + "|" + stint).to_numpy()
 
@@ -401,20 +417,25 @@ def check_non_negative(degradation_function, max_age, tolerance_s, ages=None):
     >>> check_non_negative(lambda n: 0.07 * n, 40.0, 0.01).violated
     False
     """
+    # Check the function, the age range and the tolerance.
     if not callable(degradation_function):
         raise TypeError("degradation_function must be callable, d(ages) -> degradation [s].")
     if not np.isfinite(max_age) or max_age < 0:
         raise ValueError(f"max_age must be a finite number of laps >= 0, got {max_age}.")
     if not np.isfinite(tolerance_s) or tolerance_s < 0:
         raise ValueError(f"tolerance_s must be a finite number >= 0, got {tolerance_s}.")
+    # Default grid: every half lap from new (age 0) to the oldest training age.
     if ages is None:
         ages = np.arange(0.0, max_age + 0.25, 0.5)
+    # Evaluate d on the grid and check it returned one value per age.
     ages = check_tyre_age(ages, "ages")
     values = np.asarray(degradation_function(ages), dtype=float)
     if values.shape != ages.shape:
         raise ValueError(f"degradation_function returned shape {values.shape}, expected {ages.shape}.")
+    # Find the most negative point of the curve.
     position = int(np.argmin(values))
     minimum = float(values[position])
+    # Flag a violation only if it is more negative than the numerical tolerance.
     return ConstraintCheck(
         min_degradation_s=minimum,
         age_of_minimum=float(ages[position]),
@@ -495,17 +516,21 @@ def resample_stints(data, rng):
     >>> ids.tolist(), times.tolist()
     ([0, 0, 0, 1, 1], [80.0, 80.1, 80.2, 81.0, 81.2])
     """
+    # Check the inputs: StintData and a seeded NumPy random generator (reproducibility).
     if not isinstance(data, StintData):
         raise TypeError(f"data must be a StintData, got {type(data).__name__}.")
     if not isinstance(rng, np.random.Generator):
         raise TypeError("rng must be a numpy.random.Generator, e.g. numpy.random.default_rng(42).")
+    # Draw n_stints stint indices with replacement (the bootstrap resample).
     chosen = rng.integers(0, data.n_stints, size=data.n_stints)
     ages, times, ids = [], [], []
+    # Copy every drawn stint's laps; a stint drawn twice becomes two separate stints.
     for new_id, stint in enumerate(chosen):
         mask = data.stint_index == stint
         ages.append(data.tyre_age[mask])
         times.append(data.lap_time[mask])
         ids.append(np.full(mask.sum(), new_id))
+    # Join the drawn stints into one resampled data set.
     return np.concatenate(ages), np.concatenate(times), np.concatenate(ids)
 
 
@@ -545,16 +570,21 @@ def stint_bootstrap(data, fit_parameters, names, n_resamples, confidence_level, 
     -------
     >>> result = stint_bootstrap(data, refit, ("a", "b"), 200, 0.95, 42)  # doctest: +SKIP
     """
+    # Check the number of resamples and the confidence level.
     if isinstance(n_resamples, bool) or not isinstance(n_resamples, (int, np.integer)) or n_resamples < 2:
         raise ValueError(f"n_resamples must be an integer >= 2, got {n_resamples!r}.")
     if not 0 < confidence_level < 1:
         raise ValueError(f"confidence_level must be in (0, 1), got {confidence_level}.")
+    # Seeded generator so the bootstrap gives the same result every run (rule 11).
     rng = np.random.default_rng(seed)
     estimates = []
+    # Refit the parameters on each resample of whole stints.
     for _ in range(n_resamples):
         ages, times, ids = resample_stints(data, rng)
         estimates.append(np.asarray(fit_parameters(ages, times, ids), dtype=float))
+    # One row per resample, one column per parameter.
     estimates = np.array(estimates)
+    # Percentile interval: cut off (1 - level)/2 of the resamples on each side.
     tail = (1.0 - confidence_level) / 2.0 * 100.0
     return BootstrapResult(
         names=tuple(names),
@@ -597,11 +627,13 @@ def format_parameter_table(names, values, analytic_se, bootstrap=None):
     >>> format_parameter_table(["a [s/lap]"], [0.0597], [0.0021])
     ['  a [s/lap]       0.0597   SE(analytic) 0.0021']
     """
+    # Check that every parameter has a value and a standard error.
     if not len(names) == len(values) == len(analytic_se):
         raise ValueError(f"names, values and analytic_se must have the same length, got "
                          f"{len(names)}, {len(values)} and {len(analytic_se)}.")
     if bootstrap is not None and len(bootstrap.standard_errors) != len(names):
         raise ValueError("bootstrap must have one standard error per parameter name.")
+    # One formatted line per parameter, with bootstrap SE and interval when available.
     lines = []
     for i, name in enumerate(names):
         line = f"  {name:<14s} {values[i]: .6g}   SE(analytic) {analytic_se[i]:.3g}"
